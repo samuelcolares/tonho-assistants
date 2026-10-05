@@ -78,3 +78,75 @@ export interface Reminder {
   done: boolean;
   notifiedAt?: string | null;
 }
+
+// --- Bonnie · Repos (git/GitHub stats) ---
+
+export interface GitProject {
+  id: string;
+  name: string;
+  localPath: string;
+  githubOwner?: string | null;
+  githubRepo?: string | null;
+  myEmails: string[];
+  enabled: boolean;
+}
+
+export interface GitStatsRange {
+  since: string;
+  until: string;
+}
+
+export type RangePreset = "30" | "45" | "60" | "90" | "custom";
+
+export interface CommitsByDay {
+  date: string;
+  count: number;
+}
+
+export interface FileChurn {
+  path: string;
+  changes: number;
+}
+
+export interface LocalGitStats {
+  commitCount: number;
+  additions: number;
+  deletions: number;
+  commitsByDay: CommitsByDay[];
+  topFiles: FileChurn[];
+}
+
+export interface ContributorStats {
+  login: string;
+  avatarUrl?: string | null;
+  commitCount: number;
+  additions: number;
+  deletions: number;
+  isMe: boolean;
+}
+
+export interface GithubStats {
+  totalPrsAuthored: number;
+  openPrsAuthored: number;
+  mergedPrsAuthoredInRange: number;
+  closedUnmergedInRange: number;
+  avgTimeToMergeHours?: number | null;
+  reviewsGivenInRange: number;
+  issuesOpenedInRange: number;
+  issuesClosedInRange: number;
+}
+
+export interface GitProjectStats {
+  local: LocalGitStats;
+  github?: GithubStats | null;
+  githubError?: string | null;
+  contributors: ContributorStats[];
+  range: GitStatsRange;
+  fetchedAt: string;
+  fromCache: boolean;
+}
+
+export interface GithubTokenStatus {
+  configured: boolean;
+  login?: string | null;
+}

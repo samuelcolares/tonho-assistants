@@ -4,7 +4,17 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { isPermissionGranted, requestPermission } from "@tauri-apps/plugin-notification";
 import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
-import type { ActivityEntry, AppConfig, Reminder, ScanResult, VaultEntry } from "./types";
+import type {
+  ActivityEntry,
+  AppConfig,
+  GitProject,
+  GitProjectStats,
+  GitStatsRange,
+  GithubTokenStatus,
+  Reminder,
+  ScanResult,
+  VaultEntry,
+} from "./types";
 
 export function getConfig(): Promise<AppConfig> {
   return invoke("get_config");
@@ -115,6 +125,42 @@ export async function pickFolder(defaultPath?: string): Promise<string | null> {
   });
   if (Array.isArray(result)) return result[0] ?? null;
   return result;
+}
+
+export function addGitProject(path: string): Promise<GitProject> {
+  return invoke("add_git_project", { path });
+}
+
+export function listGitProjects(): Promise<GitProject[]> {
+  return invoke("list_git_projects");
+}
+
+export function updateGitProject(project: GitProject): Promise<GitProject> {
+  return invoke("update_git_project", { project });
+}
+
+export function removeGitProject(id: string): Promise<void> {
+  return invoke("remove_git_project", { id });
+}
+
+export function getGitStats(projectId: string, range: GitStatsRange): Promise<GitProjectStats> {
+  return invoke("get_git_stats", { projectId, range });
+}
+
+export function refreshGitStats(projectId: string, range: GitStatsRange): Promise<GitProjectStats> {
+  return invoke("refresh_git_stats", { projectId, range });
+}
+
+export function getGithubTokenStatus(): Promise<GithubTokenStatus> {
+  return invoke("get_github_token_status");
+}
+
+export function saveGithubToken(token: string): Promise<GithubTokenStatus> {
+  return invoke("save_github_token", { token });
+}
+
+export function clearGithubToken(): Promise<void> {
+  return invoke("clear_github_token");
 }
 
 export function onActivity(cb: (entry: ActivityEntry) => void) {

@@ -10,6 +10,9 @@ src-tauri/gen/
 # Claude Code session state
 .claude/
 
+# Internal planning docs (specs, not shipped with the app)
+docs/
+
 # Editors / OS
 .DS_Store
 *.log

@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { Sidebar, type View } from "@/components/Sidebar";
 import { VaultCard } from "@/components/VaultCard";
+import { RepoStatsView } from "@/components/RepoStats";
 import { ReminderItem } from "@/components/ReminderItem";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -117,6 +118,7 @@ const VIEW_TITLES: Record<View, string> = {
   activity: "Atividade recente",
   reminders: "Lembretes & agenda",
   vault: "Vault",
+  repos: "Repos",
   settings: "Configurações",
 };
 
@@ -295,6 +297,7 @@ export default function App() {
           {view === "vault" && (
             <VaultView entries={vaultEntries} onSave={handleSaveVaultEntry} onDelete={handleDeleteVaultEntry} />
           )}
+          {view === "repos" && <RepoStatsView />}
           {view === "settings" && <SettingsView config={config} onUpdate={update} />}
         </main>
       </div>

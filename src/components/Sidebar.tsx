@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Bell, Folder, History, Lock, Settings, Zap } from "lucide-react";
+import { Bell, Folder, GitBranch, History, Lock, Settings, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import logoAntonio from "@/assets/logos/logo-antonio.png";
@@ -7,7 +7,7 @@ import logoDante from "@/assets/logos/logo-dante.png";
 import logoBonnie from "@/assets/logos/logo-bonnie.png";
 import logoGeneral from "@/assets/logos/logo-general.png";
 
-export type View = "watchers" | "actions" | "activity" | "reminders" | "vault" | "settings";
+export type View = "watchers" | "actions" | "activity" | "reminders" | "vault" | "repos" | "settings";
 
 interface NavItem {
   key: View;
@@ -21,7 +21,10 @@ const ANTONIO_ITEMS: NavItem[] = [
   { key: "activity", label: "Atividade", icon: History },
 ];
 const DANTE_ITEMS: NavItem[] = [{ key: "reminders", label: "Lembretes", icon: Bell }];
-const BONNIE_ITEMS: NavItem[] = [{ key: "vault", label: "Vault", icon: Lock }];
+const BONNIE_ITEMS: NavItem[] = [
+  { key: "vault", label: "Vault", icon: Lock },
+  { key: "repos", label: "Repos", icon: GitBranch },
+];
 
 interface DogGroupProps {
   name: string;
