@@ -305,7 +305,14 @@ export default function App() {
             <VaultView entries={vaultEntries} onSave={handleSaveVaultEntry} onDelete={handleDeleteVaultEntry} />
           )}
           {view === "repos" && <RepoStatsView />}
-          {view === "compras-dashboard" && <ComprasRoot key={view} page="dashboard" />}
+          {view === "compras-dashboard" && (
+            <ComprasRoot
+              key={view}
+              page="dashboard"
+              onGoItems={() => setView("compras-items")}
+              onGoSettings={() => setView("compras-settings")}
+            />
+          )}
           {view === "compras-items" && <ComprasRoot key={view} page="items" />}
           {view === "compras-alerts" && (
             <ComprasRoot key={view} page="alerts" onGoItems={() => setView("compras-items")} />

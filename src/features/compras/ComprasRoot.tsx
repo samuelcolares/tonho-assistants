@@ -2,29 +2,37 @@ import { useCallback, useMemo, useState } from "react";
 import { AddItemDialog } from "./AddItemDialog";
 import { AlertsView } from "./AlertsView";
 import { uniqueCategories } from "./calc";
-import { Dashboard } from "./Dashboard";
+import { Dashboard, type AddPrefill } from "./Dashboard";
 import { ItemDetail } from "./ItemDetail";
 import { ItemsView } from "./ItemsView";
 import { roomOptions } from "./rooms";
-import { SettingsDialog } from "./SettingsDialog";
+import { SettingsPage } from "./SettingsPage";
 import { useComprasData } from "./useComprasData";
 
 export type ComprasPage = "dashboard" | "items" | "alerts" | "settings";
 
 /** Entry point of the Compras module: owns data, drill-in selection and shared dialogs. */
-export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?: () => void }) {
+export function ComprasRoot({
+  page,
+  onGoItems,
+  onGoSettings,
+}: {
+  page: ComprasPage;
+  onGoItems?: () => void;
+  onGoSettings?: () => void;
+}) {
   const data = useComprasData();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
   const [addCategory, setAddCategory] = useState<string | undefined>();
-  // a entrada "Configurações" da barra lateral abre o painel com o diálogo já aberto
-  const [settingsOpen, setSettingsOpen] = useState(page === "settings");
+  const [addPrefill, setAddPrefill] = useState<AddPrefill | null>(null);
 
   const categories = useMemo(() => uniqueCategories(data.items ?? []), [data.items]);
   const rooms = useMemo(() => roomOptions(data.settingsRooms, data.items ?? []), [data.settingsRooms, data.items]);
   const closeDetail = useCallback(() => setSelectedId(null), []);
-  const openAdd = (category?: string) => {
+  const openAdd = (category?: string, prefill?: AddPrefill) => {
     setAddCategory(category);
+    setAddPrefill(prefill && (prefill.name || prefill.url) ? prefill : null);
     setAddOpen(true);
   };
 
@@ -42,8 +50,16 @@ export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?
         />
       ) : page === "alerts" ? (
         <AlertsView data={data} onOpen={setSelectedId} onGoItems={onGoItems ?? (() => {})} />
-      ) : page === "dashboard" || page === "settings" ? (
-        <Dashboard data={data} onOpen={setSelectedId} onAdd={() => openAdd()} onSettings={() => setSettingsOpen(true)} />
+      ) : page === "settings" ? (
+        <SettingsPage data={data} />
+      ) : page === "dashboard" ? (
+        <Dashboard
+          data={data}
+          onOpen={setSelectedId}
+          onAdd={(prefill) => openAdd(undefined, prefill)}
+          onGoItems={onGoItems ?? (() => {})}
+          onGoSettings={onGoSettings ?? (() => {})}
+        />
       ) : (
         <ItemsView data={data} onOpen={setSelectedId} onAdd={openAdd} />
       )}
@@ -54,13 +70,13 @@ export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?
         templates={data.templates}
         rooms={rooms}
         defaultCategory={addCategory}
+        prefill={addPrefill}
         onClose={() => setAddOpen(false)}
         onCreated={(id) => {
           data.reload();
           setSelectedId(id);
         }}
       />
-      <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onImported={data.reload} />
     </div>
   );
 }

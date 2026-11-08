@@ -37,6 +37,8 @@ interface AddItemDialogProps {
   rooms: string[];
   /** Pre-selected category (e.g. the active filter). */
   defaultCategory?: string;
+  /** Starting point from the quick-add field: a link opens the preview step, a name fills the name field. */
+  prefill?: { name?: string; url?: string } | null;
   onClose: () => void;
   onCreated: (itemId: string) => void;
 }
@@ -61,7 +63,7 @@ function CmField({
   );
 }
 
-export function AddItemDialog({ open, items, templates, rooms, defaultCategory, onClose, onCreated }: AddItemDialogProps) {
+export function AddItemDialog({ open, items, templates, rooms, defaultCategory, prefill, onClose, onCreated }: AddItemDialogProps) {
   const { toast } = useToast();
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
@@ -77,11 +79,13 @@ export function AddItemDialog({ open, items, templates, rooms, defaultCategory, 
   const [busy, setBusy] = useState(false);
 
   const categories = useMemo(() => uniqueCategories(items), [items]);
+  const prefillUrl = prefill?.url;
+  const urlFlow = prefillUrl != null;
 
   useEffect(() => {
     if (!open) return;
-    setStep(1);
-    setName("");
+    setStep(prefillUrl ? 2 : 1);
+    setName(prefill?.name ?? "");
     setCategory(defaultCategory ?? "");
     setRoom(null);
     setPriority(PRIORITY_DEFAULT);
@@ -91,7 +95,14 @@ export function AddItemDialog({ open, items, templates, rooms, defaultCategory, 
     setTemplateId(null);
     setTemplateTouched(false);
     setDraft(null);
-  }, [open, defaultCategory]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, defaultCategory, prefill]);
+
+  // link flow: once the preview is in, the product title becomes the name (unless the user already typed one)
+  const previewTitle = draft?.kind === "url" ? draft.extracted.title : null;
+  useEffect(() => {
+    if (urlFlow && previewTitle) setName((n) => (n.trim() ? n : previewTitle.trim().slice(0, 120)));
+  }, [urlFlow, previewTitle]);
 
   useEffect(() => {
     if (templateTouched) return;
@@ -218,7 +229,28 @@ export function AddItemDialog({ open, items, templates, rooms, defaultCategory, 
             </CmField>
           </div>
         ) : (
-          <OfferSourceForm draft={draft} onChange={setDraft} />
+          <>
+            {urlFlow && (
+              <div className="grid grid-cols-1 gap-4">
+                <CmField label="Nome">
+                  <CmInput value={name} onChange={(e) => setName(e.target.value)} placeholder="Como você quer chamar este item" />
+                </CmField>
+                <CmField label="Categoria">
+                  <CmInput value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Escolha ou digite uma nova" />
+                  {categories.length > 0 && (
+                    <div className="mt-1 flex flex-wrap gap-2">
+                      {categories.map((c) => (
+                        <CmChip key={c} selected={category === c} className="h-8 px-2.5" onClick={() => setCategory(c)}>
+                          {c}
+                        </CmChip>
+                      ))}
+                    </div>
+                  )}
+                </CmField>
+              </div>
+            )}
+            <OfferSourceForm draft={draft} onChange={setDraft} initialUrl={prefillUrl} />
+          </>
         )}
 
         <CmDialogFooter>
@@ -239,10 +271,10 @@ export function AddItemDialog({ open, items, templates, rooms, defaultCategory, 
               <CmButton variant="ghost" onClick={() => setStep(1)} disabled={busy}>
                 <ArrowLeft className="h-4 w-4" /> Voltar
               </CmButton>
-              <CmButton onClick={() => create(false)} disabled={busy}>
+              <CmButton onClick={() => create(false)} disabled={busy || !step1Valid}>
                 Criar sem oferta
               </CmButton>
-              <CmButton variant="strong" onClick={() => create(true)} disabled={busy || !draftIsValid(draft)}>
+              <CmButton variant="strong" onClick={() => create(true)} disabled={busy || !draftIsValid(draft) || !step1Valid}>
                 {busy ? "Criando…" : "Criar item e oferta"}
               </CmButton>
             </>

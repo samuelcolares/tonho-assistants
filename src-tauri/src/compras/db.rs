@@ -26,7 +26,7 @@ fn parse_ts(s: &str) -> Option<DateTime<Utc>> {
 
 // ---------------------------------------------------------------- abertura/migração
 
-const SCHEMA_V1: &str = "
+pub(crate) const SCHEMA_V1: &str = "
 CREATE TABLE items(
   id TEXT PRIMARY KEY,
   category TEXT NOT NULL,
@@ -140,7 +140,7 @@ UPDATE items SET priority = priority + 1 WHERE priority IN (0, 1);
 pub const SCHEMA_VERSION: i64 = 3;
 
 /// Caminho do arquivo do banco (None para banco em memória).
-fn db_file_path(conn: &Connection) -> Option<std::path::PathBuf> {
+pub(crate) fn db_file_path(conn: &Connection) -> Option<std::path::PathBuf> {
     let file: String = conn
         .query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |r| r.get(0))
         .ok()?;

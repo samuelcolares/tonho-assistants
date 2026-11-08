@@ -10,7 +10,7 @@ import {
   onComprasUpdated,
 } from "@/api";
 import { useToast } from "@/hooks/use-toast";
-import type { BudgetSummary, CategoryTemplate, ItemView, PollStatus } from "@/types";
+import type { BudgetSummary, CategoryTemplate, ComprasSettings, ItemView, PollStatus } from "@/types";
 import { errorMessage } from "./format";
 
 export interface ComprasData {
@@ -20,6 +20,8 @@ export interface ComprasData {
   archived: ItemView[];
   /** Rooms the user listed in the settings (empty = use the default suggestions). */
   settingsRooms: string[];
+  /** Settings as of the last load (null until loaded or if they failed to load). */
+  settings: ComprasSettings | null;
   summary: BudgetSummary | null;
   templates: CategoryTemplate[];
   pollStatus: PollStatus | null;
@@ -32,6 +34,7 @@ export function useComprasData(): ComprasData {
   const [items, setItems] = useState<ItemView[] | null>(null);
   const [archived, setArchived] = useState<ItemView[]>([]);
   const [settingsRooms, setSettingsRooms] = useState<string[]>([]);
+  const [settings, setSettings] = useState<ComprasSettings | null>(null);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [templates, setTemplates] = useState<CategoryTemplate[]>([]);
   const [pollStatus, setPollStatus] = useState<PollStatus | null>(null);
@@ -50,7 +53,10 @@ export function useComprasData(): ComprasData {
         comprasGetSettings().catch(() => null), // room suggestions only: never blocks the list
       ]);
       if (!alive.current) return;
-      if (cfg) setSettingsRooms(cfg.rooms ?? []);
+      if (cfg) {
+        setSettingsRooms(cfg.rooms ?? []);
+        setSettings(cfg);
+      }
       setItems(i.filter((v) => !v.item.archived));
       setArchived(i.filter((v) => v.item.archived));
       setSummary(s);
@@ -98,5 +104,5 @@ export function useComprasData(): ComprasData {
     };
   }, [reload]);
 
-  return { items, archived, settingsRooms, summary, templates, pollStatus, error, reload };
+  return { items, archived, settingsRooms, settings, summary, templates, pollStatus, error, reload };
 }

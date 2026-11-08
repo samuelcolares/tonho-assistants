@@ -372,3 +372,29 @@ export function comprasTestNotification(): Promise<void> {
 export function onComprasAlert(cb: (event: AlertEvent) => void) {
   return listen<AlertEvent>("compras://alert", (event) => cb(event.payload));
 }
+
+// --- Compras: backup e restauração ---
+
+/** Grava uma cópia do banco em `path` (sobrescreve). Devolve o caminho gravado. */
+export function comprasBackup(path: string): Promise<string> {
+  return invoke("compras_backup", { path });
+}
+
+/** Substitui os dados atuais pelo backup; devolve o caminho da cópia do estado anterior. */
+export function comprasRestore(path: string): Promise<string> {
+  return invoke("compras_restore", { path });
+}
+
+export function pickBackupSavePath(defaultPath = "compras-backup.db"): Promise<string | null> {
+  return save({ defaultPath, filters: [{ name: "Backup de Compras", extensions: ["db"] }] });
+}
+
+export async function pickBackupFile(): Promise<string | null> {
+  const result = await open({
+    multiple: false,
+    directory: false,
+    filters: [{ name: "Backup de Compras", extensions: ["db", "bak", "sqlite"] }],
+  });
+  if (Array.isArray(result)) return result[0] ?? null;
+  return result;
+}

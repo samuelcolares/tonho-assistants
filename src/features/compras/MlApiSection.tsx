@@ -1,17 +1,16 @@
 import { useEffect, useState } from "react";
-import { CheckCircle2, ExternalLink, KeyRound } from "lucide-react";
+import { CheckCircle2, ExternalLink } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { comprasMlClearCredentials, comprasMlSaveCredentials, comprasMlStatus } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import type { MlStatus } from "@/types";
 import { errorMessage } from "./format";
+import { CmButton, CmInput } from "./ui";
 
 const DEVCENTER = "https://developers.mercadolivre.com.br/devcenter";
 
 /** Credenciais do app do Mercado Livre (API oficial). Ficam no cofre do Windows, nunca em arquivo. */
-export function MlApiSection({ open }: { open: boolean }) {
+export function MlApiSection() {
   const { toast } = useToast();
   const [status, setStatus] = useState<MlStatus | null>(null);
   const [clientId, setClientId] = useState("");
@@ -19,15 +18,13 @@ export function MlApiSection({ open }: { open: boolean }) {
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (!open) return;
-    setSecret("");
     comprasMlStatus()
       .then((s) => {
         setStatus(s);
         setClientId(s.clientId ?? "");
       })
       .catch(() => setStatus({ configured: false, clientId: null }));
-  }, [open]);
+  }, []);
 
   const save = async () => {
     setBusy(true);
@@ -56,40 +53,47 @@ export function MlApiSection({ open }: { open: boolean }) {
   };
 
   return (
-    <div className="flex flex-col gap-2 border-t border-border pt-4">
-      <div className="flex items-center gap-2">
-        <KeyRound className="h-4 w-4 text-ink-muted" />
-        <strong className="text-[13px] text-ink">Mercado Livre (API oficial)</strong>
+    <div className="mt-6 flex flex-col gap-3 border-t border-cm-hairline pt-6">
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="text-[14px] font-bold text-cm-ink">Mercado Livre (API oficial)</p>
         {status?.configured && (
-          <span className="flex items-center gap-1 text-[12px] font-medium text-compras">
-            <CheckCircle2 className="h-3.5 w-3.5" /> conectado
+          <span className="inline-flex items-center gap-1.5 border border-cm-accent px-2 py-0.5 text-[11px] font-bold uppercase tracking-[1.5px] text-cm-accent">
+            <CheckCircle2 className="h-3.5 w-3.5" /> Conectado
           </span>
         )}
       </div>
-      <p className="text-[12px] text-ink-faint">
-        O site do ML bloqueia consultas automáticas. Crie um app grátis no DevCenter do Mercado Livre e cole aqui o App ID e a
-        chave secreta. Use links de catálogo (com <code>/p/MLB…</code>). As credenciais ficam no cofre do Windows.
+      <p className="max-w-xl text-[13px] font-light text-cm-muted">
+        O site do Mercado Livre bloqueia consultas automáticas. Crie um app grátis no DevCenter e cole aqui o App ID e a chave
+        secreta. Use links de catálogo (com <code className="text-cm-body">/p/MLB…</code>). Os dados ficam no cofre do Windows.
       </p>
-      <Button variant="ghost" size="sm" className="w-fit px-0 text-[12px]" onClick={() => openUrl(DEVCENTER)}>
+      <CmButton variant="ghost" size="sm" className="w-fit px-0" onClick={() => openUrl(DEVCENTER)}>
         <ExternalLink className="h-3.5 w-3.5" /> Abrir DevCenter do Mercado Livre
-      </Button>
-      <div className="flex flex-wrap items-center gap-2">
-        <Input className="w-44" placeholder="App ID" value={clientId} onChange={(e) => setClientId(e.target.value)} disabled={busy} />
-        <Input
-          className="w-56"
+      </CmButton>
+      <div className="flex flex-wrap items-center gap-3">
+        <CmInput
+          aria-label="App ID"
+          className="w-48"
+          placeholder="App ID"
+          value={clientId}
+          onChange={(e) => setClientId(e.target.value)}
+          disabled={busy}
+        />
+        <CmInput
+          aria-label="Chave secreta"
+          className="w-60"
           type="password"
           placeholder={status?.configured ? "Chave secreta (salva)" : "Chave secreta"}
           value={secret}
           onChange={(e) => setSecret(e.target.value)}
           disabled={busy}
         />
-        <Button size="sm" onClick={save} disabled={busy || !clientId.trim() || !secret.trim()}>
+        <CmButton onClick={save} disabled={busy || !clientId.trim() || !secret.trim()}>
           {busy ? "Validando…" : status?.configured ? "Atualizar" : "Conectar"}
-        </Button>
+        </CmButton>
         {status?.configured && (
-          <Button size="sm" variant="ghost" onClick={clear} disabled={busy}>
+          <CmButton variant="danger-ghost" onClick={clear} disabled={busy}>
             Desconectar
-          </Button>
+          </CmButton>
         )}
       </div>
     </div>

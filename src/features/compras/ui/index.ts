@@ -12,3 +12,4 @@ export { Sparkline } from "./Sparkline";
 export { CmTextarea } from "./CmInput";
 export { CmField } from "./CmField";
 export { CmCheckbox, CmSelect } from "./CmSelect";
+export { CmSwitch } from "./CmSwitch";

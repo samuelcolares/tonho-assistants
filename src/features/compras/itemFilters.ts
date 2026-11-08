@@ -1,6 +1,9 @@
 import type { ItemView } from "@/types";
 import { alertStatus } from "./alertCalc";
 
+/** localStorage key of the Itens screen preferences (tab, sort, grouping). */
+export const ITEMS_PREFS_KEY = "compras.items.prefs.v2";
+
 export type ItemTab = "target" | "falling" | "noAlert" | "noPrice" | "all" | "bought" | "archived";
 
 export const TAB_ORDER: ItemTab[] = ["target", "falling", "noAlert", "noPrice", "all", "bought", "archived"];

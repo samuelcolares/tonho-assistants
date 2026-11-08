@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AlertTriangle, Link2, Loader2, PenLine, Search } from "lucide-react";
 import { comprasPreviewUrl } from "@/api";
 import { Badge } from "@/components/ui/badge";
@@ -34,6 +34,8 @@ interface OfferSourceFormProps {
   draft: OfferDraft | null;
   onChange: (d: OfferDraft | null) => void;
   className?: string;
+  /** A link to preview as soon as the form shows up (quick add on the Hoje panel). */
+  initialUrl?: string;
 }
 
 type Mode = "url" | "manual";
@@ -48,9 +50,9 @@ const EMPTY_MANUAL: Extract<OfferDraft, { kind: "manual" }> = {
 };
 
 /** URL (with preview) or manual offer entry. Shared by "add item" and "add offer". */
-export function OfferSourceForm({ draft, onChange, className }: OfferSourceFormProps) {
+export function OfferSourceForm({ draft, onChange, className, initialUrl }: OfferSourceFormProps) {
   const [mode, setMode] = useState<Mode>(draft?.kind ?? "url");
-  const [url, setUrl] = useState(draft?.kind === "url" ? draft.extracted.url : "");
+  const [url, setUrl] = useState(draft?.kind === "url" ? draft.extracted.url : (initialUrl ?? ""));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -78,6 +80,15 @@ export function OfferSourceForm({ draft, onChange, className }: OfferSourceFormP
       setLoading(false);
     }
   };
+
+  const autoFetched = useRef(false);
+  useEffect(() => {
+    if (autoFetched.current || !initialUrl || draft) return;
+    autoFetched.current = true;
+    void fetchPreview();
+    // once, when the form opens with a link already in hand
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const useManualFromBlocked = () => {
     setMode("manual");

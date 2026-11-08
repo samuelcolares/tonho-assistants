@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpDown, Bell, Plus, Search, ShoppingCart } from "lucide-react";
-import { comprasArchiveItem, comprasBulkSetTarget, comprasDeleteItem, comprasGetSettings, comprasUnmarkBought } from "@/api";
+import { comprasArchiveItem, comprasDeleteItem, comprasUnmarkBought } from "@/api";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { ItemView } from "@/types";
 import { AlertDialog } from "./AlertDialog";
+import { BulkAlertDialog, bulkCandidates } from "./BulkAlertDialog";
 import { deltaVsBudget } from "./calc";
 import { errorMessage, normalizeText } from "./format";
-import { hasPrice, matchesTab, TAB_HINT, TAB_LABEL, TAB_ORDER, tabCounts, type ItemTab } from "./itemFilters";
+import { ITEMS_PREFS_KEY, matchesTab, TAB_HINT, TAB_LABEL, TAB_ORDER, tabCounts, type ItemTab } from "./itemFilters";
 import { ItemsTable, type ItemGroup } from "./ItemsTable";
 import { MarkBoughtDialog } from "./MarkBoughtDialog";
 import { roomGroupKey } from "./rooms";
@@ -39,7 +40,7 @@ interface Prefs {
   collapsed: string[];
 }
 
-const PREFS_KEY = "compras.items.prefs.v2";
+const PREFS_KEY = ITEMS_PREFS_KEY;
 const DEFAULT_PREFS: Prefs = { tab: "all", sortKey: "default", sortDir: "asc", groupBy: "category", collapsed: [] };
 
 const SORT_LABELS: Record<SortKey, string> = {
@@ -109,8 +110,6 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
   const [deleteTarget, setDeleteTarget] = useState<ItemView | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
-  const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkPct, setBulkPct] = useState(10);
 
   useEffect(() => savePref(PREFS_KEY, prefs), [prefs]);
   const patch = (p: Partial<Prefs>) => setPrefs((prev) => ({ ...prev, ...p }));
@@ -162,35 +161,8 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
 
   // Not-bought items that have a price but no enabled alert: candidates for the bulk action.
-  const withoutAlert = useMemo(() => all.filter((v) => !v.item.bought && hasPrice(v) && v.alert?.enabled !== true), [all]);
+  const withoutAlert = useMemo(() => bulkCandidates(all), [all]);
 
-  const openBulk = () => {
-    setBulkOpen(true);
-    comprasGetSettings()
-      .then((s) => setBulkPct(s.defaultTargetPct > 0 ? s.defaultTargetPct : 10))
-      .catch(() => {});
-  };
-
-  const confirmBulk = async () => {
-    setBulkBusy(true);
-    try {
-      const n = await comprasBulkSetTarget(
-        withoutAlert.map((v) => v.item.id),
-        bulkPct
-      );
-      toast({
-        variant: "success",
-        title: n === 1 ? "Aviso ligado em 1 item" : `Aviso ligado em ${n} itens`,
-        description: `Vamos avisar com ${bulkPct}% abaixo do preço de hoje.`,
-      });
-      setBulkOpen(false);
-      await reload();
-    } catch (e) {
-      toast({ variant: "danger", title: "Não foi possível ligar os avisos", description: errorMessage(e) });
-    } finally {
-      setBulkBusy(false);
-    }
-  };
   const collapsed = useMemo(() => new Set(prefs.collapsed), [prefs.collapsed]);
 
   const toggleGroup = (key: string) => {
@@ -256,7 +228,7 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
         </div>
         <div className="flex flex-wrap items-center justify-end gap-3">
           {withoutAlert.length > 0 && (
-            <CmButton variant="ghost" onClick={openBulk} title={`${withoutAlert.length} itens com preço e sem aviso`}>
+            <CmButton variant="ghost" onClick={() => setBulkOpen(true)} title={`${withoutAlert.length} itens com preço e sem aviso`}>
               <Bell className="h-4 w-4" /> Avisar todos sem alerta
               <span className="font-light tabular-nums">({withoutAlert.length})</span>
             </CmButton>
@@ -395,26 +367,7 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
         </CmDialogContent>
       </CmDialog>
 
-      <CmDialog open={bulkOpen} onOpenChange={(o) => !o && !bulkBusy && setBulkOpen(false)}>
-        <CmDialogContent className="max-w-md">
-          <CmDialogTitle>Avisar todos sem alerta</CmDialogTitle>
-          <CmDialogDescription>
-            Ligar aviso com {bulkPct}% abaixo do preço atual em {withoutAlert.length}{" "}
-            {withoutAlert.length === 1 ? "item" : "itens"}?
-          </CmDialogDescription>
-          <p className="text-[13px] font-light text-cm-muted">
-            Só entram itens não comprados que já têm preço e ainda não têm aviso ligado. Você pode ajustar cada um depois.
-          </p>
-          <CmDialogFooter>
-            <CmButton disabled={bulkBusy} onClick={() => setBulkOpen(false)}>
-              Cancelar
-            </CmButton>
-            <CmButton variant="strong" disabled={bulkBusy || withoutAlert.length === 0} onClick={confirmBulk}>
-              {bulkBusy ? "Ligando…" : "Ligar avisos"}
-            </CmButton>
-          </CmDialogFooter>
-        </CmDialogContent>
-      </CmDialog>
+      <BulkAlertDialog open={bulkOpen} candidates={withoutAlert} onClose={() => setBulkOpen(false)} onDone={reload} />
     </div>
   );
 }

@@ -393,6 +393,8 @@ pub fn run() {
             compras::compras_save_settings,
             compras::compras_import_xlsx,
             compras::compras_export_csv,
+            compras::compras_backup,
+            compras::compras_restore,
             compras::compras_get_alert,
             compras::compras_set_alert,
             compras::compras_bulk_set_target,

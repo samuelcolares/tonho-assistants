@@ -2,6 +2,7 @@
 //! Contrato de comandos/structs: docs/compras.spec.md seção 4.
 
 pub mod alerts;
+pub mod backup;
 pub mod db;
 pub mod extract;
 pub mod http;
@@ -686,6 +687,30 @@ pub fn compras_export_csv(app: AppHandle, path: String) -> Result<i64, String> {
     };
     std::fs::write(&path, text).map_err(|e| format!("Não foi possível gravar o CSV: {e}"))?;
     Ok(rows as i64)
+}
+
+/// Backup do banco em `path` (VACUUM INTO num temporário + renomear). Devolve o caminho gravado.
+#[tauri::command(async)]
+pub fn compras_backup(app: AppHandle, path: String) -> Result<String, String> {
+    let st = state(&app)?;
+    let conn = st.conn()?;
+    let out = backup::backup_to(&conn, std::path::Path::new(&path))?;
+    Ok(out.to_string_lossy().into_owned())
+}
+
+/// Restaura o backup `path` por cima dos dados atuais. Antes guarda o estado atual em
+/// `compras.db.bak-restore-*` (pasta de Compras); devolve o caminho dessa cópia.
+#[tauri::command(async)]
+pub fn compras_restore(app: AppHandle, path: String) -> Result<String, String> {
+    let st = state(&app)?;
+    let bak = backup::safety_backup_path(&st.dir);
+    {
+        let mut conn = st.conn()?;
+        backup::restore_from(&mut conn, std::path::Path::new(&path), &bak)?;
+    }
+    st.wake(false);
+    emit_updated(&app, None);
+    Ok(bak.to_string_lossy().into_owned())
 }
 
 // ---------------------------------------------------------------- Mercado Livre (API oficial)
