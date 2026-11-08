@@ -25,7 +25,8 @@ import { PriceChart } from "./PriceChart";
 import { ConfirmDialog } from "./shared";
 import { SpecsForm } from "./SpecsForm";
 import { StatsPanel } from "./StatsPanel";
-import { CmButton, CmIconButton } from "./ui";
+import { VERDICT_ADVICE } from "./labels";
+import { CmButton, CmIconButton, VerdictChip } from "./ui";
 import { formatBRL } from "./money";
 
 const NO_TEMPLATE = "__none__";
@@ -170,9 +171,15 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
         <CmButton variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="h-4 w-4" /> Voltar
         </CmButton>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
-          <h2 className="truncate text-[20px] font-bold uppercase text-cm-ink">{view.item.name}</h2>
-          <ItemBadges view={view} />
+        <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <h2 className="truncate text-[20px] font-bold uppercase text-cm-ink">{view.item.name}</h2>
+            {!view.item.bought && <VerdictChip verdict={view.verdict} />}
+            <ItemBadges view={view} />
+          </div>
+          {!view.item.bought && view.verdict && (
+            <p className="text-[14px] font-light text-cm-body-strong">{VERDICT_ADVICE[view.verdict]}</p>
+          )}
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <CmIconButton

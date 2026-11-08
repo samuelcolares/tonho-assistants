@@ -2,28 +2,19 @@ import { useState } from "react";
 import { DollarSign, ExternalLink, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { comprasDeleteOffer, comprasRefresh, comprasUpsertOffer } from "@/api";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import type { OfferStatus, OfferView } from "@/types";
+import type { OfferView } from "@/types";
 import { BrlInput } from "./BrlInput";
 import { errorMessage, formatRelative } from "./format";
 import { formatBRL } from "./money";
 import { ConfirmDialog } from "./shared";
 import { toOffer } from "./offerActions";
 import { ManualPriceDialog, OfferEditDialog } from "./OfferDialogs";
-
-const STATUS: Record<OfferStatus, { label: string; variant: "default" | "success" | "warning" | "danger" }> = {
-  ok: { label: "OK", variant: "success" },
-  pending: { label: "Aguardando", variant: "default" },
-  manual: { label: "Manual", variant: "default" },
-  suspect: { label: "Suspeito", variant: "warning" },
-  blocked: { label: "Bloqueado", variant: "danger" },
-  broken: { label: "Quebrado", variant: "danger" },
-  paused: { label: "Pausada", variant: "default" },
-};
+import { CmTag } from "./ItemBadges";
+import { STATUS_INFO } from "./labels";
 
 const CASH_LABEL = { page: "Pix na página", estimated: "Pix estimado", list: "preço cheio" } as const;
 
@@ -68,7 +59,7 @@ function OfferRow({ offer, isBest, onChanged }: { offer: OfferView; isBest: bool
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
-  const st = STATUS[offer.status];
+  const st = STATUS_INFO[offer.status];
 
   const run = async (fn: () => Promise<unknown>, okMsg?: string) => {
     try {
@@ -118,10 +109,10 @@ function OfferRow({ offer, isBest, onChanged }: { offer: OfferView; isBest: bool
           <div className="flex flex-wrap items-center gap-1.5">
             <strong className="text-[13px] text-ink group-hover:text-compras group-hover:underline">{offer.store}</strong>
             {offer.url && <ExternalLink className="h-3.5 w-3.5 text-ink-faint group-hover:text-compras" />}
-            <Badge variant={st.variant} title={offer.lastError ?? undefined} className="text-[10.5px]">
+            <CmTag variant={st.variant} title={offer.lastError ? `${st.hint}. ${offer.lastError}` : st.hint}>
               {st.label}
-            </Badge>
-            {isBest && <Badge variant="success" className="text-[10.5px]">Melhor</Badge>}
+            </CmTag>
+            {isBest && <CmTag variant="success">Melhor</CmTag>}
           </div>
           {offer.title && (
             <span className="line-clamp-2 text-[11.5px] text-ink-muted group-hover:text-ink" title={offer.title}>
@@ -133,7 +124,7 @@ function OfferRow({ offer, isBest, onChanged }: { offer: OfferView; isBest: bool
         </div>
 
         <div className="flex shrink-0 flex-col items-end">
-          <span className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint">Final</span>
+          <span className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint">Preço final</span>
           <span className={cn("text-[18px] font-bold tabular-nums", isBest ? "text-compras" : "text-ink")}>
             {formatBRL(offer.finalCents)}
           </span>

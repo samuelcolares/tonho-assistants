@@ -6,11 +6,13 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import type { ItemView, OfferStatus } from "@/types";
+import type { ItemView } from "@/types";
 import { problemOffers } from "./calc";
 import { CategoryChart } from "./CategoryChart";
 import { errorMessage, formatRelative } from "./format";
-import { formatBRL, formatBRLSigned, formatPct } from "./money";
+import { formatBRL, formatPct } from "./money";
+import { CmTag } from "./ItemBadges";
+import { belowAboveText, STATUS_INFO } from "./labels";
 import { ItemThumb } from "./shared";
 import { ImportReportDialog, useImportXlsx } from "./useImportXlsx";
 import type { ComprasData } from "./useComprasData";
@@ -21,12 +23,6 @@ interface DashboardProps {
   onAdd: () => void;
   onSettings: () => void;
 }
-
-const STATUS_LABEL: Partial<Record<OfferStatus, { label: string; variant: "warning" | "danger" }>> = {
-  suspect: { label: "Suspeito", variant: "warning" },
-  blocked: { label: "Bloqueado", variant: "danger" },
-  broken: { label: "Quebrado", variant: "danger" },
-};
 
 export function Dashboard({ data, onOpen, onAdd, onSettings }: DashboardProps) {
   const { toast } = useToast();
@@ -124,8 +120,8 @@ export function Dashboard({ data, onOpen, onAdd, onSettings }: DashboardProps) {
           <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1">
             <span className="text-3xl font-bold tabular-nums text-ink">{formatBRL(summary.remainingAtCurrentCents)}</span>
             <span className={cn("text-sm font-semibold tabular-nums", deltaCurrent < 0 ? "text-success" : deltaCurrent > 0 ? "text-danger" : "text-ink-muted")}>
-              {formatBRLSigned(deltaCurrent)} ({deltaCurrent > 0 ? "+" : deltaCurrent < 0 ? "−" : ""}
-              {formatPct(Math.abs(deltaPct))}) vs orçado
+              vs orçado: {belowAboveText(deltaCurrent, formatBRL)}
+              {deltaCurrent !== 0 && ` (${formatPct(Math.abs(deltaPct))})`}
             </span>
           </div>
           <span className="text-[12.5px] text-ink-muted">
@@ -155,8 +151,8 @@ export function Dashboard({ data, onOpen, onAdd, onSettings }: DashboardProps) {
       </Card>
 
       <div className="grid grid-cols-1 gap-3 xl:grid-cols-3">
-        <ItemList title="Abaixo do alvo" empty="Nenhum item no alvo ainda. Defina o preço-alvo no detalhe do item." items={lists.belowTarget} onOpen={onOpen} renderRight={(v) => <TargetRight v={v} />} />
-        <ItemList title="Menores preços históricos" empty="Nenhum item no menor preço histórico." items={lists.historicalLow} onOpen={onOpen} renderRight={(v) => <span className="text-[13px] font-semibold tabular-nums text-success">{formatBRL(v.best?.finalCents)}</span>} icon={<TrendingDown className="h-4 w-4 text-success" />} />
+        <ItemList title="No preço desejado" empty="Nenhum item no preço desejado ainda. Use o sino para ser avisado quando baixar." items={lists.belowTarget} onOpen={onOpen} renderRight={(v) => <TargetRight v={v} />} />
+        <ItemList title="No menor preço já visto" empty="Nenhum item no menor preço já visto." items={lists.historicalLow} onOpen={onOpen} renderRight={(v) => <span className="text-[13px] font-semibold tabular-nums text-success">{formatBRL(v.best?.finalCents)}</span>} icon={<TrendingDown className="h-4 w-4 text-success" />} />
         <ItemList title="Ofertas com problema" empty="Todas as ofertas estão saudáveis." items={lists.problems} onOpen={onOpen} renderRight={(v) => <ProblemRight v={v} />} />
       </div>
 
@@ -239,7 +235,7 @@ function TargetRight({ v }: { v: ItemView }) {
   return (
     <span className="flex flex-col items-end leading-tight">
       <span className="text-[13px] font-semibold tabular-nums text-success">{formatBRL(v.best?.finalCents)}</span>
-      <span className="text-[10.5px] tabular-nums text-ink-faint">alvo {formatBRL(v.item.targetCents)}</span>
+      <span className="text-[10.5px] tabular-nums text-ink-faint">avisar em {formatBRL(v.item.targetCents)}</span>
     </span>
   );
 }
@@ -249,15 +245,13 @@ function ProblemRight({ v }: { v: ItemView }) {
   return (
     <span className="flex max-w-[48%] flex-col items-end gap-0.5 leading-tight">
       {offers.slice(0, 2).map((o) => {
-        const s = STATUS_LABEL[o.status];
+        const s = STATUS_INFO[o.status];
         return (
           <span key={o.id} className="flex items-center gap-1" title={o.lastError ?? undefined}>
             <span className="truncate text-[11px] text-ink-muted">{o.store}</span>
-            {s && (
-              <Badge variant={s.variant} className="text-[10px]">
-                {s.label}
-              </Badge>
-            )}
+            <CmTag variant={s.variant} title={s.hint}>
+              {s.label}
+            </CmTag>
           </span>
         );
       })}

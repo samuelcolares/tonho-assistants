@@ -107,7 +107,7 @@ export function PriceChart({ itemId, offers, targetCents, refreshKey }: PriceCha
             />
             <Legend wrapperStyle={{ fontSize: 12, color: "#9298b3" }} />
             {targetCents != null && (
-              <ReferenceLine y={targetCents} stroke="#f2c94c" strokeDasharray="5 4" label={{ value: "alvo", fill: "#f2c94c", fontSize: 11, position: "insideTopRight" }} />
+              <ReferenceLine y={targetCents} stroke="#f2c94c" strokeDasharray="5 4" label={{ value: "avisar em", fill: "#f2c94c", fontSize: 11, position: "insideTopRight" }} />
             )}
             {offerKeys.map((id, i) => (
               <Line
@@ -123,7 +123,7 @@ export function PriceChart({ itemId, offers, targetCents, refreshKey }: PriceCha
                 isAnimationActive={false}
               />
             ))}
-            <Line type="stepAfter" dataKey="best" name="Melhor final" stroke="#2dc98a" strokeWidth={2.5} dot={sparse ? { r: 3 } : false} connectNulls isAnimationActive={false} />
+            <Line type="stepAfter" dataKey="best" name="Melhor preço" stroke="#2dc98a" strokeWidth={2.5} dot={sparse ? { r: 3 } : false} connectNulls isAnimationActive={false} />
           </LineChart>
         </ResponsiveContainer>
       )}

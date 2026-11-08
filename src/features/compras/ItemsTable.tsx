@@ -5,9 +5,10 @@ import type { ItemView } from "@/types";
 import { alertStatus } from "./alertCalc";
 import { budgetLine, deltaVsBudget, unitPriceOf } from "./calc";
 import { ItemBadges } from "./ItemBadges";
-import { formatBRL, formatBRLSigned, formatPct } from "./money";
+import { belowAboveText } from "./labels";
+import { formatBRL, formatPct } from "./money";
 import { ItemThumb } from "./shared";
-import { CmIconButton } from "./ui";
+import { CmIconButton, VerdictChip } from "./ui";
 
 export interface ColumnPrefs {
   median: boolean;
@@ -27,7 +28,7 @@ const CASH_SOURCE_LABEL = {
 } as const;
 
 function gridTemplate(cols: ColumnPrefs): string {
-  const parts = ["32px", "minmax(280px,2.4fr)", "minmax(150px,1fr)", "104px", "124px", "112px", "112px"];
+  const parts = ["32px", "minmax(280px,2.4fr)", "minmax(150px,1fr)", "132px", "104px", "124px", "112px", "132px"];
   if (cols.median) parts.push("104px");
   if (cols.p25) parts.push("104px");
   if (cols.pix) parts.push("150px");
@@ -48,7 +49,7 @@ interface ItemsTableProps {
 
 export function ItemsTable({ groups, cols, collapsed, onToggleGroup, onOpen, onToggleBought, onAlert }: ItemsTableProps) {
   const template = gridTemplate(cols);
-  const minWidth = 32 + 280 + 150 + 104 + 124 + 112 * 2 + 40 + (cols.median ? 104 : 0) + (cols.p25 ? 104 : 0) + (cols.pix ? 150 : 0) + 80;
+  const minWidth = 32 + 280 + 150 + 132 + 104 + 124 + 112 + 132 + 40 + (cols.median ? 104 : 0) + (cols.p25 ? 104 : 0) + (cols.pix ? 150 : 0) + 80;
 
   return (
     <div className="overflow-x-auto border border-cm-hairline bg-cm-canvas">
@@ -59,13 +60,14 @@ export function ItemsTable({ groups, cols, collapsed, onToggleGroup, onOpen, onT
         >
           <span />
           <span>Item</span>
-          <span>Melhor final (un.)</span>
-          <span className="text-right">Mín. histórico</span>
+          <span>Melhor preço (c/ frete)</span>
+          <span>Está barato?</span>
+          <span className="text-right">Menor já visto</span>
           <span className="text-right">Avisar em</span>
           <span className="text-right">Orçado</span>
-          <span className="text-right">Δ vs orçado</span>
-          {cols.median && <span className="text-right">Mediana</span>}
-          {cols.p25 && <span className="text-right">Preço bom (P25)</span>}
+          <span className="text-right">Vs orçado</span>
+          {cols.median && <span className="text-right">Preço típico</span>}
+          {cols.p25 && <span className="text-right">Baixo até</span>}
           {cols.pix && <span className="text-right">Pix vs cartão</span>}
           <span className="sr-only">Aviso</span>
         </div>
@@ -188,6 +190,7 @@ const ItemRow = memo(function ItemRow({ view, cols, template, onOpen, onToggleBo
       </div>
 
       <PriceCell view={view} reached={alert.reached} />
+      <div className="flex">{item.bought ? <span className="text-[12px] text-cm-muted">—</span> : <VerdictChip verdict={view.verdict} />}</div>
 
       <span className="text-right text-[13px] tabular-nums text-cm-body">{formatBRL(stats.allTimeLowCents)}</span>
       <AlertCell view={view} onAlert={onAlert} />
@@ -208,7 +211,7 @@ const ItemRow = memo(function ItemRow({ view, cols, template, onOpen, onToggleBo
                 delta.cents < 0 ? "text-cm-accent" : delta.cents > 0 ? "text-cm-danger" : "text-cm-body"
               )}
             >
-              {formatBRLSigned(delta.cents)}
+              {belowAboveText(delta.cents, formatBRL)}
             </span>
             <span className="text-[11px] tabular-nums text-cm-muted">
               {delta.pct > 0 ? "+" : delta.pct < 0 ? "−" : ""}

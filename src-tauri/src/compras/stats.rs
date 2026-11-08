@@ -1,6 +1,6 @@
 //! Estatísticas de preço (spec seção 6). Funções puras, testáveis sem banco.
 
-use super::model::{CashSource, ItemStats, Trend};
+use super::model::{CashSource, ItemStats, PriceRange, Trend, Verdict};
 use chrono::{DateTime, Duration, FixedOffset, NaiveDate, Utc};
 use std::collections::BTreeMap;
 
@@ -61,6 +61,30 @@ pub fn effective_cash(
         }
         None => (Some(l), Some(CashSource::List)),
     }
+}
+
+/// Como `effective_cash`, respeitando a configuração "usar Pix": desligada, vale o preço de lista
+/// (sem cash/Pix, nem estimado); sem lista, cai no preço de página.
+pub fn effective_cash_basis(
+    list: Option<i64>,
+    cash: Option<i64>,
+    offer_pix_pct: Option<f64>,
+    store_pix_pct: Option<f64>,
+    use_pix: bool,
+) -> (Option<i64>, Option<CashSource>) {
+    if use_pix {
+        return effective_cash(list, cash, offer_pix_pct, store_pix_pct);
+    }
+    match (list, cash) {
+        (Some(l), _) => (Some(l), Some(CashSource::List)),
+        (None, Some(c)) => (Some(c), Some(CashSource::Page)),
+        (None, None) => (None, None),
+    }
+}
+
+/// Como `final_price`, respeitando a configuração "incluir frete" (desligada: final = à vista).
+pub fn final_price_basis(effective_cash: Option<i64>, shipping: Option<i64>, include_shipping: bool) -> Option<i64> {
+    final_price(effective_cash, if include_shipping { shipping } else { None })
 }
 
 /// final = à vista efetivo + frete (frete desconhecido conta 0).
@@ -161,6 +185,64 @@ pub fn compute_stats(
         above_median,
         trend: trend(series),
     }
+}
+
+/// Mínimo de amostras (dias com dado na janela) para dar um veredito.
+pub const VERDICT_MIN_SAMPLES: i64 = 5;
+/// Mínimo de dias entre o primeiro e o último dia com dado.
+pub const VERDICT_MIN_SPAN_DAYS: i64 = 14;
+pub const SPARKLINE_DAYS: usize = 30;
+
+/// Dias entre o primeiro e o último dia com dado dentro da janela (0 sem dados).
+pub fn window_span_days(series: &[(NaiveDate, i64)], today: NaiveDate, window_days: i64) -> i64 {
+    let cutoff = today - Duration::days(window_days.max(0));
+    let mut it = series.iter().filter(|(d, _)| *d >= cutoff).map(|(d, _)| *d);
+    let Some(first) = it.next() else { return 0 };
+    let last = it.last().unwrap_or(first);
+    (last - first).num_days()
+}
+
+/// Veredito do preço atual. None sem preço atual. Aprendendo com poucas amostras ou período curto.
+/// Baixo: atual <= P25. Alto: atual >= P75. Preço sem variação (P25 == P75 == atual) é normal.
+pub fn verdict(samples: i64, span_days: i64, current: Option<i64>, p25: Option<i64>, p75: Option<i64>) -> Option<Verdict> {
+    let cur = current?;
+    if samples < VERDICT_MIN_SAMPLES || span_days < VERDICT_MIN_SPAN_DAYS {
+        return Some(Verdict::Collecting);
+    }
+    let (Some(p25), Some(p75)) = (p25, p75) else { return Some(Verdict::Collecting) };
+    if p25 == p75 && cur == p25 {
+        return Some(Verdict::Normal);
+    }
+    Some(if cur <= p25 {
+        Verdict::Low
+    } else if cur >= p75 {
+        Verdict::High
+    } else {
+        Verdict::Normal
+    })
+}
+
+/// Faixa de 90 dias + atual. None sem preço atual ou sem amostras.
+pub fn price_range(st: &ItemStats) -> Option<PriceRange> {
+    Some(PriceRange {
+        min_cents: st.min_cents?,
+        p25_cents: st.p25_cents?,
+        p75_cents: st.p75_cents?,
+        max_cents: st.max_cents?,
+        current_cents: st.current_final_cents?,
+    })
+}
+
+/// `n` pontos diários terminando em `today` (inclusive). Carrega o último valor adiante
+/// (inclusive o de antes da janela); None antes do primeiro dado. `series` ordenada por dia.
+pub fn sparkline(series: &[(NaiveDate, i64)], today: NaiveDate, n: usize) -> Vec<Option<i64>> {
+    let mut out = Vec::with_capacity(n);
+    for i in 0..n {
+        let day = today - Duration::days((n - 1 - i) as i64);
+        let v = series.iter().take_while(|(d, _)| *d <= day).last().map(|(_, v)| *v);
+        out.push(v);
+    }
+    out
 }
 
 /// (MA7 - MA30) / MA30: < -2% desce, > +2% sobe, senão estável. None com < 7 pontos.
@@ -349,5 +431,101 @@ mod tests {
         assert_eq!(pts[&d(2)].best, 90);
         assert_eq!(pts[&d(2)].per_offer["a"], 100);
         assert_eq!(pts[&d(3)].best, 100);
+    }
+
+    #[test]
+    fn verdict_boundaries() {
+        let v = |cur, p25, p75| verdict(10, 30, Some(cur), Some(p25), Some(p75));
+        assert_eq!(v(100, 100, 200), Some(Verdict::Low)); // == p25
+        assert_eq!(v(99, 100, 200), Some(Verdict::Low));
+        assert_eq!(v(101, 100, 200), Some(Verdict::Normal));
+        assert_eq!(v(199, 100, 200), Some(Verdict::Normal));
+        assert_eq!(v(200, 100, 200), Some(Verdict::High)); // == p75
+        assert_eq!(v(250, 100, 200), Some(Verdict::High));
+        // sem variação: preço igual aos percentis é normal; abaixo ainda é baixo
+        assert_eq!(v(100, 100, 100), Some(Verdict::Normal));
+        assert_eq!(v(90, 100, 100), Some(Verdict::Low));
+        assert_eq!(v(110, 100, 100), Some(Verdict::High));
+    }
+
+    #[test]
+    fn verdict_none_without_current_and_collecting_rules() {
+        assert_eq!(verdict(10, 30, None, Some(1), Some(2)), None);
+        // amostras < 5
+        assert_eq!(verdict(4, 30, Some(100), Some(100), Some(200)), Some(Verdict::Collecting));
+        assert_eq!(verdict(5, 30, Some(100), Some(100), Some(200)), Some(Verdict::Low));
+        // período < 14 dias
+        assert_eq!(verdict(10, 13, Some(100), Some(100), Some(200)), Some(Verdict::Collecting));
+        assert_eq!(verdict(10, 14, Some(100), Some(100), Some(200)), Some(Verdict::Low));
+        // sem dados nenhum, mas com preço atual
+        assert_eq!(verdict(0, 0, Some(100), None, None), Some(Verdict::Collecting));
+    }
+
+    #[test]
+    fn window_span_ignores_points_outside_window() {
+        assert_eq!(window_span_days(&[], d(30), 90), 0);
+        assert_eq!(window_span_days(&[(d(5), 1)], d(30), 90), 0);
+        assert_eq!(window_span_days(&[(d(5), 1), (d(19), 1)], d(30), 90), 14);
+        let old = NaiveDate::from_ymd_opt(2026, 1, 1).unwrap();
+        // ponto antigo fora da janela de 90 dias não conta
+        assert_eq!(window_span_days(&[(old, 1), (d(5), 1), (d(7), 1)], d(30), 90), 2);
+    }
+
+    #[test]
+    fn price_range_needs_samples_and_current() {
+        let series: Vec<_> = (1..=5).map(|i| (d(i), 100 * i as i64)).collect();
+        let st = compute_stats(&series, d(5), 90, Some(150), None);
+        assert_eq!(
+            price_range(&st),
+            Some(PriceRange { min_cents: 100, p25_cents: 200, p75_cents: 400, max_cents: 500, current_cents: 150 })
+        );
+        let st = compute_stats(&series, d(5), 90, None, None);
+        assert_eq!(price_range(&st), None);
+        let st = compute_stats(&[], d(5), 90, Some(150), None);
+        assert_eq!(price_range(&st), None);
+    }
+
+    #[test]
+    fn sparkline_is_30_points_forward_filled() {
+        let today = d(30);
+        // dado só em 10 e 20; depois disso carrega o último valor até hoje
+        let s = sparkline(&[(d(10), 100), (d(20), 80)], today, 30);
+        assert_eq!(s.len(), 30);
+        assert_eq!(s[0], None); // dia 1
+        assert_eq!(s[8], None); // dia 9
+        assert_eq!(s[9], Some(100)); // dia 10
+        assert_eq!(s[18], Some(100)); // dia 19
+        assert_eq!(s[19], Some(80)); // dia 20
+        assert_eq!(s[29], Some(80)); // hoje
+    }
+
+    #[test]
+    fn sparkline_seeds_from_before_window_and_handles_empty() {
+        let old = NaiveDate::from_ymd_opt(2026, 8, 1).unwrap();
+        let s = sparkline(&[(old, 500)], d(30), 30);
+        assert_eq!(s.len(), 30);
+        assert!(s.iter().all(|v| *v == Some(500)));
+        let e = sparkline(&[], d(30), 30);
+        assert_eq!(e.len(), 30);
+        assert!(e.iter().all(|v| v.is_none()));
+        // dado só no futuro (relativo a hoje) fica nulo
+        assert!(sparkline(&[(d(31), 1)], d(30), 30).iter().all(|v| v.is_none()));
+    }
+
+    #[test]
+    fn price_basis_flags() {
+        // usePix=true mantém o comportamento atual
+        assert_eq!(effective_cash_basis(Some(10000), None, Some(5.0), None, true), (Some(9500), Some(CashSource::Estimated)));
+        assert_eq!(effective_cash_basis(Some(10000), Some(9000), None, None, true), (Some(9000), Some(CashSource::Page)));
+        // usePix=false: lista, ignora cash de página e desconto estimado
+        assert_eq!(effective_cash_basis(Some(10000), Some(9000), Some(5.0), None, false), (Some(10000), Some(CashSource::List)));
+        assert_eq!(effective_cash_basis(Some(10000), None, None, Some(10.0), false), (Some(10000), Some(CashSource::List)));
+        // sem lista: cai no preço de página; sem nada: nada
+        assert_eq!(effective_cash_basis(None, Some(9000), None, None, false), (Some(9000), Some(CashSource::Page)));
+        assert_eq!(effective_cash_basis(None, None, None, None, false), (None, None));
+        // includeShipping
+        assert_eq!(final_price_basis(Some(9500), Some(700), true), Some(10200));
+        assert_eq!(final_price_basis(Some(9500), Some(700), false), Some(9500));
+        assert_eq!(final_price_basis(None, Some(700), false), None);
     }
 }

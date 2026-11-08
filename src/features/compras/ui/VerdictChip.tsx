@@ -1,27 +1,29 @@
 import { cn } from "@/lib/utils";
+import type { Verdict } from "@/types";
+import { VERDICT_HINT, VERDICT_LABEL } from "../labels";
 
-export type Verdict = "low" | "normal" | "high" | "collecting";
+export type { Verdict };
 
-const STYLE: Record<Verdict, { label: string; cls: string }> = {
-  low: { label: "Preço baixo", cls: "border-cm-accent text-cm-accent" },
-  normal: { label: "Preço normal", cls: "border-cm-hairline text-cm-body" },
-  high: { label: "Preço alto", cls: "border-cm-warn text-cm-warn" },
-  collecting: { label: "Ainda aprendendo", cls: "border-dashed border-cm-hairline text-cm-muted" },
+const STYLE: Record<Verdict, string> = {
+  low: "border-cm-accent text-cm-accent",
+  normal: "border-cm-hairline text-cm-body",
+  high: "border-cm-warn text-cm-warn",
+  collecting: "border-dashed border-cm-hairline text-cm-muted",
 };
 
-/** Stub for P3: the backend verdict is not available yet, so callers may pass null (renders nothing). */
+/** Sharp uppercase verdict chip. Renders nothing without a verdict (no current price). */
 export function VerdictChip({ verdict, className }: { verdict: Verdict | null | undefined; className?: string }) {
   if (!verdict) return null;
-  const s = STYLE[verdict];
   return (
     <span
+      title={VERDICT_HINT[verdict]}
       className={cn(
-        "inline-flex items-center rounded-none border px-2 py-0.5 text-[11px] font-bold uppercase tracking-[1.5px]",
-        s.cls,
+        "inline-flex items-center whitespace-nowrap rounded-none border px-2 py-0.5 text-[11px] font-bold uppercase tracking-[1.5px]",
+        STYLE[verdict],
         className
       )}
     >
-      {s.label}
+      {VERDICT_LABEL[verdict]}
     </span>
   );
 }

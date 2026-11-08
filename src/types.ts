@@ -258,6 +258,17 @@ export interface ItemStats {
   trend: "down" | "up" | "flat" | null;
 }
 
+export type Verdict = "low" | "normal" | "high" | "collecting";
+
+/** 90-day price range plus the current price (cents). */
+export interface PriceRange {
+  minCents: number;
+  p25Cents: number;
+  p75Cents: number;
+  maxCents: number;
+  currentCents: number;
+}
+
 export interface ItemView {
   item: ComprasItem;
   imageFile: string | null;
@@ -266,6 +277,12 @@ export interface ItemView {
   stats: ItemStats;
   purchase: ComprasPurchase | null;
   alert: AlertRule | null;
+  /** null = no current price. */
+  verdict: Verdict | null;
+  /** null = no current price or no samples in the last 90 days. */
+  range: PriceRange | null;
+  /** Exactly 30 daily points ending today (forward-filled); null before the first data. */
+  sparkline: (number | null)[];
 }
 
 export interface CategoryBudget {

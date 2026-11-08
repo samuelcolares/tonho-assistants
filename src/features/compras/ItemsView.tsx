@@ -49,7 +49,7 @@ const SORT_LABELS: Record<SortKey, string> = {
   default: "Ordem da planilha",
   name: "Nome",
   price: "Preço atual",
-  delta: "Δ vs orçado",
+  delta: "Vs orçado",
   priority: "Prioridade",
 };
 
@@ -271,8 +271,8 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
               <div className="absolute right-0 z-30 mt-1 flex w-56 flex-col gap-1 rounded-none border border-cm-hairline bg-cm-card p-2">
                 {(
                   [
-                    ["median", "Mediana"],
-                    ["p25", "Preço bom (P25)"],
+                    ["median", "Preço típico"],
+                    ["p25", "Baixo até"],
                     ["pix", "Pix vs cartão"],
                   ] as const
                 ).map(([k, label]) => (

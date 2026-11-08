@@ -1219,12 +1219,28 @@ fn store_pix_pct(settings: &ComprasSettings, store: &str) -> Option<f64> {
         .copied()
 }
 
+/// Base de preço de uma observação: à vista efetivo, origem e final, conforme `usePix`/`includeShipping`.
+fn price_basis(
+    ob: &ComprasObservation,
+    offer: &ComprasOffer,
+    settings: &ComprasSettings,
+) -> (Option<i64>, Option<CashSource>, Option<i64>) {
+    let (cash, src) = stats::effective_cash_basis(
+        ob.list_cents,
+        ob.cash_cents,
+        offer.pix_discount_pct,
+        store_pix_pct(settings, &offer.store),
+        settings.use_pix,
+    );
+    let fin = stats::final_price_basis(cash, offer.shipping_cents, settings.include_shipping);
+    (cash, src, fin)
+}
+
 pub fn offer_view(offer: ComprasOffer, latest: Option<ComprasObservation>, settings: &ComprasSettings) -> OfferView {
-    let (cash, src) = match &latest {
-        Some(l) => stats::effective_cash(l.list_cents, l.cash_cents, offer.pix_discount_pct, store_pix_pct(settings, &offer.store)),
-        None => (None, None),
+    let (cash, src, final_cents) = match &latest {
+        Some(l) => price_basis(l, &offer, settings),
+        None => (None, None, None),
     };
-    let final_cents = stats::final_price(cash, offer.shipping_cents);
     let shipping_known = offer.shipping_cents.is_some();
     OfferView { offer, latest, effective_cash_cents: cash, cash_source: src, final_cents, shipping_known }
 }
@@ -1248,8 +1264,8 @@ fn spans_for(offers: &[ComprasOffer], obs: &HashMap<String, Vec<ComprasObservati
             if !ob.confirmed || ob.in_stock == Some(false) {
                 continue;
             }
-            let (cash, _) = stats::effective_cash(ob.list_cents, ob.cash_cents, o.pix_discount_pct, store_pix_pct(settings, &o.store));
-            let Some(fin) = stats::final_price(cash, o.shipping_cents) else { continue };
+            let (_, _, fin) = price_basis(ob, o, settings);
+            let Some(fin) = fin else { continue };
             let (Some(first), Some(last)) = (parse_ts(&ob.first_seen_at), parse_ts(&ob.last_seen_at)) else { continue };
             out.push(PricedSpan { offer_id: o.id.clone(), final_cents: fin, first, last });
         }
@@ -1336,7 +1352,12 @@ pub fn load_views(
             .collect();
         let best = best_of(&offer_views);
         let series: Vec<(NaiveDate, i64)> = stats::daily_points(&spans, tz).into_iter().map(|(d, p)| (d, p.best)).collect();
-        let st = stats::compute_stats(&series, today, 90, best.as_ref().and_then(|b| b.final_cents), item.target_cents);
+        let current_final = best.as_ref().and_then(|b| b.final_cents);
+        let st = stats::compute_stats(&series, today, 90, current_final, item.target_cents);
+        let span_days = stats::window_span_days(&series, today, 90);
+        let verdict = stats::verdict(st.samples, span_days, current_final, st.p25_cents, st.p75_cents);
+        let range = stats::price_range(&st);
+        let sparkline = stats::sparkline(&series, today, stats::SPARKLINE_DAYS);
         let image_file = item
             .image_path
             .as_ref()
@@ -1345,7 +1366,7 @@ pub fn load_views(
             .map(|p| p.to_string_lossy().into_owned());
         let purchase = purchases.get(&item.id).cloned();
         let alert = rules.get(&item.id).cloned();
-        views.push(ItemView { item, image_file, offers: offer_views, best, stats: st, purchase, alert });
+        views.push(ItemView { item, image_file, offers: offer_views, best, stats: st, purchase, alert, verdict, range, sparkline });
     }
     Ok(views)
 }
@@ -1820,6 +1841,56 @@ mod tests {
         assert_eq!(e.title.as_deref(), Some("SSD X"));
         assert_eq!(e.sku.as_deref(), Some("S1"));
         assert_eq!(e.next_poll_at.as_deref(), Some("2026-11-05T14:00:00Z"));
+    }
+
+    #[test]
+    fn price_basis_flags_drive_final_and_stats() {
+        let c = mem();
+        let it = new_item(&c, "Geladeira", 1, Some(444900));
+        let mut a = new_offer(&c, &it.id, None, "Sam's");
+        a.shipping_cents = Some(15000);
+        let a = upsert_offer(&c, a, NOW).unwrap();
+        add_manual_price(&c, &a.id, Some(450000), Some(440000), Some(true), "2026-11-05T10:00:00Z").unwrap();
+        let get = |c: &Connection| views(c).remove(0);
+
+        // padrão: à vista + frete
+        let v = get(&c);
+        assert_eq!(v.best.as_ref().unwrap().final_cents, Some(455000));
+        assert_eq!(v.stats.current_final_cents, Some(455000));
+        assert_eq!(v.stats.min_cents, Some(455000));
+        assert_eq!(v.sparkline.len(), 30);
+        assert_eq!(v.sparkline[29], Some(455000));
+        assert_eq!(v.sparkline[0], None);
+        assert_eq!(v.verdict, Some(Verdict::Collecting));
+
+        // sem frete
+        let mut s = ComprasSettings::default();
+        s.include_shipping = false;
+        save_settings(&c, s).unwrap();
+        let v = get(&c);
+        let b = v.best.as_ref().unwrap();
+        assert_eq!(b.final_cents, Some(440000));
+        assert_eq!(b.effective_cash_cents, Some(440000));
+        assert_eq!(v.stats.min_cents, Some(440000));
+        assert_eq!(v.sparkline[29], Some(440000));
+
+        // sem Pix: preço de lista (com frete)
+        let mut s = ComprasSettings::default();
+        s.use_pix = false;
+        save_settings(&c, s).unwrap();
+        let v = get(&c);
+        let b = v.best.as_ref().unwrap();
+        assert_eq!(b.effective_cash_cents, Some(450000));
+        assert_eq!(b.cash_source, Some(CashSource::List));
+        assert_eq!(b.final_cents, Some(465000));
+        assert_eq!(v.stats.min_cents, Some(465000));
+
+        // os dois desligados: lista pura
+        let mut s = ComprasSettings::default();
+        s.use_pix = false;
+        s.include_shipping = false;
+        save_settings(&c, s).unwrap();
+        assert_eq!(get(&c).best.unwrap().final_cents, Some(450000));
     }
 
     #[test]

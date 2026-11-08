@@ -228,6 +228,24 @@ pub struct ItemStats {
     pub trend: Option<Trend>,
 }
 
+str_enum!(Verdict {
+    Low => "low",
+    Normal => "normal",
+    High => "high",
+    Collecting => "collecting",
+});
+
+/// Faixa dos últimos 90 dias + preço atual (barra de faixa na UI).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct PriceRange {
+    pub min_cents: i64,
+    pub p25_cents: i64,
+    pub p75_cents: i64,
+    pub max_cents: i64,
+    pub current_cents: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemView {
@@ -238,6 +256,12 @@ pub struct ItemView {
     pub stats: ItemStats,
     pub purchase: Option<ComprasPurchase>,
     pub alert: Option<AlertRule>,
+    /// None = sem preço atual.
+    pub verdict: Option<Verdict>,
+    /// None = sem preço atual ou sem amostras na janela de 90 dias.
+    pub range: Option<PriceRange>,
+    /// Exatamente 30 pontos diários terminando hoje; None antes do primeiro dado.
+    pub sparkline: Vec<Option<i64>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
