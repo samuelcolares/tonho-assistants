@@ -1,5 +1,6 @@
 mod action_rules;
 mod activity;
+mod compras;
 mod config;
 mod git_projects;
 mod git_stats;
@@ -369,6 +370,31 @@ pub fn run() {
             get_github_token_status,
             save_github_token,
             clear_github_token,
+            compras::compras_list_items,
+            compras::compras_get_item,
+            compras::compras_upsert_item,
+            compras::compras_delete_item,
+            compras::compras_mark_bought,
+            compras::compras_unmark_bought,
+            compras::compras_upsert_offer,
+            compras::compras_delete_offer,
+            compras::compras_add_manual_price,
+            compras::compras_preview_url,
+            compras::compras_save_image_from_url,
+            compras::compras_set_image_from_file,
+            compras::compras_history,
+            compras::compras_budget_summary,
+            compras::compras_refresh,
+            compras::compras_poll_status,
+            compras::compras_list_templates,
+            compras::compras_upsert_template,
+            compras::compras_get_settings,
+            compras::compras_save_settings,
+            compras::compras_import_xlsx,
+            compras::compras_export_csv,
+            compras::compras_ml_status,
+            compras::compras_ml_save_credentials,
+            compras::compras_ml_clear_credentials,
             quit_app,
         ])
         .setup(|app| {
@@ -388,6 +414,14 @@ pub fn run() {
             let git_projects = git_projects::load_git_projects(&handle);
             app.manage(GitProjectState(Mutex::new(git_projects)));
             app.manage(StatsCacheState(Mutex::new(HashMap::new())));
+
+            match compras::init(&handle) {
+                Ok(state) => {
+                    app.manage(state);
+                    compras::spawn_ticker(handle.clone());
+                }
+                Err(e) => eprintln!("[compras] módulo desativado: {e}"),
+            }
 
             build_tray(app)?;
 

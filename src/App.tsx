@@ -11,6 +11,7 @@ import {
 import { Sidebar, type View } from "@/components/Sidebar";
 import { VaultCard } from "@/components/VaultCard";
 import { RepoStatsView } from "@/components/RepoStats";
+import { ComprasRoot } from "@/features/compras/ComprasRoot";
 import { ReminderItem } from "@/components/ReminderItem";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -119,6 +120,9 @@ const VIEW_TITLES: Record<View, string> = {
   reminders: "Lembretes & agenda",
   vault: "Vault",
   repos: "Repos",
+  "compras-dashboard": "Compras · Painel",
+  "compras-items": "Compras · Itens",
+  "compras-settings": "Compras · Configurações",
   settings: "Configurações",
 };
 
@@ -262,9 +266,11 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-border px-6 py-4">
           <h1 className="text-[22px] font-semibold leading-7 text-ink">{VIEW_TITLES[view]}</h1>
-          <Button onClick={handleSave} disabled={!dirty || saving}>
-            {saving ? "Salvando…" : "Salvar alterações"}
-          </Button>
+          {!view.startsWith("compras-") && (
+            <Button onClick={handleSave} disabled={!dirty || saving}>
+              {saving ? "Salvando…" : "Salvar alterações"}
+            </Button>
+          )}
         </header>
 
         <main className="flex-1 overflow-y-auto p-6">
@@ -298,6 +304,9 @@ export default function App() {
             <VaultView entries={vaultEntries} onSave={handleSaveVaultEntry} onDelete={handleDeleteVaultEntry} />
           )}
           {view === "repos" && <RepoStatsView />}
+          {view === "compras-dashboard" && <ComprasRoot key={view} page="dashboard" />}
+          {view === "compras-items" && <ComprasRoot key={view} page="items" />}
+          {view === "compras-settings" && <ComprasRoot key={view} page="settings" />}
           {view === "settings" && <SettingsView config={config} onUpdate={update} />}
         </main>
       </div>

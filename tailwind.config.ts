@@ -24,6 +24,7 @@ const config: Config = {
         antonio: { DEFAULT: "#f2933a", subtle: "#2a170a" },
         dante: { DEFAULT: "#3b9eff", subtle: "#0f2138" },
         bonnie: { DEFAULT: "#1eb4c8", subtle: "#0b2429" },
+        compras: { DEFAULT: "#2dc98a", subtle: "#0c2a20" },
         success: { DEFAULT: "#34d399", subtle: "#0f2b23", on: "#04140f" },
         warning: { DEFAULT: "#f2c94c", subtle: "#2b230a", on: "#1f1400" },
         danger: { DEFAULT: "#f87171", subtle: "#2c1414", on: "#1a0505" },

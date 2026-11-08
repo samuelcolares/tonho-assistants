@@ -1,5 +1,5 @@
 import type { ComponentType } from "react";
-import { Bell, Folder, GitBranch, History, Lock, Settings, Zap } from "lucide-react";
+import { Bell, Folder, GitBranch, History, LayoutDashboard, Lock, Settings, ShoppingCart, SlidersHorizontal, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
 import logoAntonio from "@/assets/logos/logo-antonio.png";
@@ -7,7 +7,17 @@ import logoDante from "@/assets/logos/logo-dante.png";
 import logoBonnie from "@/assets/logos/logo-bonnie.png";
 import logoGeneral from "@/assets/logos/logo-general.png";
 
-export type View = "watchers" | "actions" | "activity" | "reminders" | "vault" | "repos" | "settings";
+export type View =
+  | "watchers"
+  | "actions"
+  | "activity"
+  | "reminders"
+  | "vault"
+  | "repos"
+  | "compras-dashboard"
+  | "compras-items"
+  | "compras-settings"
+  | "settings";
 
 interface NavItem {
   key: View;
@@ -24,6 +34,12 @@ const DANTE_ITEMS: NavItem[] = [{ key: "reminders", label: "Lembretes", icon: Be
 const BONNIE_ITEMS: NavItem[] = [
   { key: "vault", label: "Vault", icon: Lock },
   { key: "repos", label: "Repos", icon: GitBranch },
+];
+
+const COMPRAS_ITEMS: NavItem[] = [
+  { key: "compras-dashboard", label: "Painel", icon: LayoutDashboard },
+  { key: "compras-items", label: "Itens", icon: ShoppingCart },
+  { key: "compras-settings", label: "Configurações", icon: SlidersHorizontal },
 ];
 
 interface DogGroupProps {
@@ -140,6 +156,17 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
           activeBgClass="bg-bonnie-subtle"
           activeTextClass="text-bonnie"
           items={BONNIE_ITEMS}
+          view={view}
+          onChangeView={onChangeView}
+        />
+        <DogGroup
+          name="Compras para Casa"
+          role="Preços & orçamento"
+          logo={logoGeneral}
+          ringClass="ring-compras"
+          activeBgClass="bg-compras-subtle"
+          activeTextClass="text-compras"
+          items={COMPRAS_ITEMS}
           view={view}
           onChangeView={onChangeView}
         />

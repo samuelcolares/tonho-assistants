@@ -150,3 +150,183 @@ export interface GithubTokenStatus {
   configured: boolean;
   login?: string | null;
 }
+
+// --- Compras para Casa (price tracker) ---
+
+export type OfferAdapter = "generic" | "kabum" | "amazon" | "vtex" | "mercadolivre" | "manual";
+
+export interface MlStatus { configured: boolean; clientId: string | null; }
+export type OfferStatus = "pending" | "ok" | "manual" | "suspect" | "blocked" | "broken" | "paused";
+export type SpecKind = "text" | "number" | "bool" | "enum";
+
+export interface SpecField {
+  key: string;
+  label: string;
+  kind: SpecKind;
+  options?: string[] | null;
+  unit?: string | null;
+}
+export interface CategoryTemplate {
+  id: string;
+  name: string;
+  fields: SpecField[];
+}
+
+export interface ComprasItem {
+  id: string; // "" on create
+  category: string;
+  name: string;
+  qty: number;
+  budgetUnitCents: number | null;
+  targetCents: number | null;
+  notes: string;
+  bought: boolean;
+  imagePath: string | null;
+  specs: Record<string, string>;
+  templateId: string | null;
+  modelToken: string | null;
+  priority: number; // 0 normal, 1 high
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ComprasOffer {
+  id: string;
+  itemId: string;
+  store: string;
+  url: string | null;
+  title: string | null;
+  sku: string | null;
+  adapter: OfferAdapter;
+  shippingCents: number | null;
+  shippingNote: string | null;
+  pixDiscountPct: number | null;
+  status: OfferStatus;
+  failCount: number;
+  lastError: string | null;
+  lastCheckedAt: string | null;
+  nextPollAt: string | null;
+  createdAt: string;
+}
+
+export interface ComprasObservation {
+  id: string;
+  offerId: string;
+  listCents: number | null;
+  cashCents: number | null;
+  installmentsText: string | null;
+  inStock: boolean | null;
+  source: "auto" | "manual";
+  confirmed: boolean;
+  firstSeenAt: string;
+  lastSeenAt: string;
+  error: string | null;
+}
+
+export interface ComprasPurchase {
+  itemId: string;
+  paidUnitCents: number;
+  shippingCents: number;
+  store: string;
+  purchasedAt: string;
+  notes: string;
+}
+
+export interface OfferView extends ComprasOffer {
+  latest: ComprasObservation | null;
+  effectiveCashCents: number | null;
+  cashSource: "page" | "estimated" | "list" | null;
+  finalCents: number | null;
+  shippingKnown: boolean;
+}
+
+export interface ItemStats {
+  windowDays: number;
+  samples: number;
+  minCents: number | null;
+  maxCents: number | null;
+  meanCents: number | null;
+  medianCents: number | null;
+  trimmedMeanCents: number | null;
+  p25Cents: number | null;
+  p75Cents: number | null;
+  allTimeLowCents: number | null;
+  currentFinalCents: number | null;
+  isHistoricalLow: boolean;
+  belowTarget: boolean;
+  aboveMedian: boolean;
+  trend: "down" | "up" | "flat" | null;
+}
+
+export interface ItemView {
+  item: ComprasItem;
+  imageFile: string | null;
+  offers: OfferView[];
+  best: OfferView | null;
+  stats: ItemStats;
+  purchase: ComprasPurchase | null;
+}
+
+export interface CategoryBudget {
+  category: string;
+  budgetCents: number;
+  boughtCents: number;
+  currentCents: number;
+}
+export interface BudgetSummary {
+  totalBudgetCents: number;
+  boughtCents: number;
+  remainingBudgetCents: number;
+  remainingAtCurrentCents: number;
+  pricedItems: number;
+  pctDone: number;
+  itemsTotal: number;
+  itemsBought: number;
+  byCategory: CategoryBudget[];
+}
+
+export interface HistoryPoint {
+  date: string;
+  bestFinalCents: number | null;
+  perOffer: Record<string, number | null>;
+}
+
+export interface Extracted {
+  url: string;
+  store: string;
+  adapter: OfferAdapter;
+  title: string | null;
+  imageUrl: string | null;
+  listCents: number | null;
+  cashCents: number | null;
+  installmentsText: string | null;
+  inStock: boolean | null;
+  sku: string | null;
+  blocked: boolean;
+  warnings: string[];
+}
+
+export interface ImportReport {
+  inserted: number;
+  updated: number;
+  skipped: number;
+  boughtImported: number;
+  totalBudgetCents: number;
+  boughtCents: number;
+  remainingBudgetCents: number;
+  errors: string[];
+}
+
+export interface ComprasSettings {
+  pollEnabled: boolean;
+  pollIntervalMinutes: number;
+  amazonMinIntervalMinutes: number;
+  cep: string | null;
+  pixDiscountByStore: Record<string, number>;
+}
+
+export interface PollStatus {
+  running: boolean;
+  queued: number;
+  lastRunAt: string | null;
+}
