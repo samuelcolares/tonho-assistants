@@ -1,65 +1,96 @@
-import { useState } from "react";
-import { DollarSign, ExternalLink, Pencil, Plus, RefreshCw, Trash2 } from "lucide-react";
+import { useEffect, useState, type ReactNode } from "react";
+import { ExternalLink, MoreHorizontal, Plus } from "lucide-react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { comprasDeleteOffer, comprasRefresh, comprasUpsertOffer } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { OfferView } from "@/types";
-import { BrlInput } from "./BrlInput";
 import { errorMessage, formatRelative } from "./format";
-import { formatBRL } from "./money";
-import { ConfirmDialog } from "./shared";
-import { toOffer } from "./offerActions";
-import { ManualPriceDialog, OfferEditDialog } from "./OfferDialogs";
 import { CmTag } from "./ItemBadges";
 import { STATUS_INFO } from "./labels";
+import { formatBRL } from "./money";
+import { ManualPriceDialog, OfferEditDialog } from "./OfferDialogs";
+import { toOffer } from "./offerActions";
+import { ConfirmDialog } from "./shared";
+import {
+  CmBrlInput,
+  CmButton,
+  CmIconButton,
+  CmMenu,
+  CmMenuContent,
+  CmMenuItem,
+  CmMenuSeparator,
+  CmMenuTrigger,
+} from "./ui";
 
 const CASH_LABEL = { page: "Pix na página", estimated: "Pix estimado", list: "preço cheio" } as const;
+
+/** Wide row: store | Pix | frete | final | status | menu (fixed 524 px + gaps; store gets the rest). */
+const WIDE_COLS = "minmax(0,1fr) 108px 176px 112px 108px 32px";
 
 interface OffersTableProps {
   offers: OfferView[];
   bestId: string | null;
+  /** Narrow layout (two lines per store) for small windows. */
+  narrow?: boolean;
   onAdd: () => void;
   onChanged: () => void;
 }
 
-export function OffersTable({ offers, bestId, onAdd, onChanged }: OffersTableProps) {
+/** "Lojas" list: hairline rows with link, Pix, inline frete, final price, status and a row menu. */
+export function OffersTable({ offers, bestId, narrow = false, onAdd, onChanged }: OffersTableProps) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className="flex flex-col gap-5">
       {offers.length === 0 ? (
-        <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-8 text-center">
-          <p className="text-sm text-ink-muted">Nenhuma oferta ainda. Cole o link de uma loja ou informe um preço manualmente.</p>
-          <Button variant="secondary" onClick={onAdd}>
-            <Plus className="h-4 w-4" /> Adicionar oferta
-          </Button>
+        <div className="flex flex-col items-start gap-4 border border-dashed border-cm-hairline p-6">
+          <p className="text-[14px] font-light text-cm-body">Nenhuma loja ainda. Cole o link de uma loja ou digite um preço.</p>
+          <CmButton onClick={onAdd}>
+            <Plus className="h-4 w-4" /> Colar link
+          </CmButton>
         </div>
       ) : (
-        <div className="flex flex-col">
-          {offers.map((o) => (
-            <OfferRow key={o.id} offer={o} isBest={o.id === bestId} onChanged={onChanged} />
-          ))}
-        </div>
-      )}
-      {offers.length > 0 && (
-        <Button variant="secondary" size="sm" className="w-fit" onClick={onAdd}>
-          <Plus className="h-4 w-4" /> Adicionar oferta
-        </Button>
+        <>
+          <div>
+            {!narrow && (
+              <div
+                className="grid items-end gap-x-3 border-b border-cm-hairline px-2 pb-2 text-[11px] font-bold uppercase tracking-[1.5px] text-cm-muted"
+                style={{ gridTemplateColumns: WIDE_COLS }}
+                aria-hidden
+              >
+                <span>Loja</span>
+                <span>Pix / à vista</span>
+                <span>Frete</span>
+                <span className="text-right">Final</span>
+                <span>Status</span>
+                <span />
+              </div>
+            )}
+            <ul>
+              {offers.map((o) => (
+                <OfferRow key={o.id} offer={o} isBest={o.id === bestId} narrow={narrow} onChanged={onChanged} />
+              ))}
+            </ul>
+          </div>
+          <CmButton className="w-fit" onClick={onAdd}>
+            <Plus className="h-4 w-4" /> Colar link
+          </CmButton>
+        </>
       )}
     </div>
   );
 }
 
-function OfferRow({ offer, isBest, onChanged }: { offer: OfferView; isBest: boolean; onChanged: () => void }) {
+function OfferRow({ offer, isBest, narrow, onChanged }: { offer: OfferView; isBest: boolean; narrow: boolean; onChanged: () => void }) {
   const { toast } = useToast();
   const [shipping, setShipping] = useState<number | null>(offer.shippingCents);
-  const [note, setNote] = useState(offer.shippingNote ?? "");
   const [manualOpen, setManualOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const st = STATUS_INFO[offer.status];
+
+  // Pick up frete changes made elsewhere (edit dialog, refresh).
+  useEffect(() => setShipping(offer.shippingCents), [offer.shippingCents]);
 
   const run = async (fn: () => Promise<unknown>, okMsg?: string) => {
     try {
@@ -71,15 +102,13 @@ function OfferRow({ offer, isBest, onChanged }: { offer: OfferView; isBest: bool
     }
   };
 
-  const saveShipping = (cents: number | null, newNote: string) => {
-    const noteVal = newNote.trim() || null;
-    if (cents === offer.shippingCents && noteVal === offer.shippingNote) return;
-    run(() => comprasUpsertOffer({ ...toOffer(offer), shippingCents: cents, shippingNote: noteVal }));
+  const saveShipping = (cents: number | null, note: string | null) => {
+    if (cents === offer.shippingCents && note === offer.shippingNote) return;
+    run(() => comprasUpsertOffer({ ...toOffer(offer), shippingCents: cents, shippingNote: note }));
   };
 
   const setFree = () => {
     setShipping(0);
-    setNote("grátis");
     saveShipping(0, "grátis");
   };
 
@@ -87,134 +116,162 @@ function OfferRow({ offer, isBest, onChanged }: { offer: OfferView; isBest: bool
     if (offer.url) run(() => openUrl(offer.url!));
   };
 
-  return (
-    <div
-      className={cn(
-        "flex flex-col gap-3 border-b border-border px-2 py-3 last:border-b-0",
-        isBest && "bg-compras-subtle/40",
-        offer.status === "paused" && "opacity-60"
-      )}
-    >
-      <div className="flex items-start justify-between gap-4">
-        <div
-          className={cn("flex min-w-0 flex-col gap-1", offer.url && "group cursor-pointer")}
-          role={offer.url ? "link" : undefined}
-          tabIndex={offer.url ? 0 : undefined}
-          title={offer.url ? "Abrir oferta no navegador" : undefined}
+  const storeCell = (
+    <div className="flex min-w-0 flex-col gap-0.5">
+      {offer.url ? (
+        <button
+          type="button"
           onClick={openOffer}
-          onKeyDown={(e) => {
-            if (e.key === "Enter") openOffer();
-          }}
+          title="Abrir a loja no navegador"
+          className="group inline-flex max-w-full min-w-0 items-center gap-1.5 self-start text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cm-ink"
         >
-          <div className="flex flex-wrap items-center gap-1.5">
-            <strong className="text-[13px] text-ink group-hover:text-compras group-hover:underline">{offer.store}</strong>
-            {offer.url && <ExternalLink className="h-3.5 w-3.5 text-ink-faint group-hover:text-compras" />}
-            <CmTag variant={st.variant} title={offer.lastError ? `${st.hint}. ${offer.lastError}` : st.hint}>
-              {st.label}
-            </CmTag>
-            {isBest && <CmTag variant="success">Melhor</CmTag>}
-          </div>
-          {offer.title && (
-            <span className="line-clamp-2 text-[11.5px] text-ink-muted group-hover:text-ink" title={offer.title}>
-              {offer.title}
-            </span>
-          )}
-          {offer.lastError && <span className="line-clamp-2 text-[11px] text-danger" title={offer.lastError}>{offer.lastError}</span>}
-          {offer.latest?.inStock === false && <span className="text-[11px] font-semibold text-warning">Sem estoque</span>}
-        </div>
+          <span className="truncate text-[15px] font-bold text-cm-ink group-hover:underline">{offer.store}</span>
+          <ExternalLink className="h-3.5 w-3.5 shrink-0 text-cm-muted group-hover:text-cm-ink" aria-hidden />
+        </button>
+      ) : (
+        <span className="truncate text-[15px] font-bold text-cm-ink">{offer.store}</span>
+      )}
+      {offer.title && (
+        <span className="line-clamp-1 text-[12px] font-light text-cm-muted" title={offer.title}>
+          {offer.title}
+        </span>
+      )}
+      {offer.lastError && (
+        <span className="line-clamp-2 text-[12px] font-light text-cm-danger" title={offer.lastError}>
+          {offer.lastError}
+        </span>
+      )}
+      {offer.latest?.inStock === false && <span className="text-[12px] font-bold text-cm-warn">Sem estoque</span>}
+    </div>
+  );
 
-        <div className="flex shrink-0 flex-col items-end">
-          <span className="text-[10.5px] font-semibold uppercase tracking-wide text-ink-faint">Preço final</span>
-          <span className={cn("text-[18px] font-bold tabular-nums", isBest ? "text-compras" : "text-ink")}>
-            {formatBRL(offer.finalCents)}
-          </span>
-          <span className="text-[10.5px] text-ink-faint">verificado {formatRelative(offer.lastCheckedAt ?? offer.latest?.lastSeenAt)}</span>
+  const pixCell = (
+    <div className="flex min-w-0 flex-col" title={offer.latest?.listCents != null ? `Preço cheio: ${formatBRL(offer.latest.listCents)}` : undefined}>
+      <span className="text-[14px] font-bold tabular-nums text-cm-ink">{formatBRL(offer.effectiveCashCents)}</span>
+      {offer.cashSource && <span className="truncate text-[12px] font-light text-cm-muted">{CASH_LABEL[offer.cashSource]}</span>}
+    </div>
+  );
+
+  const shipCell = (
+    <div className="flex min-w-0 flex-col gap-1">
+      <div className="flex items-center gap-1.5">
+        <div className="w-[92px] shrink-0">
+          <CmBrlInput
+            size="sm"
+            value={shipping}
+            onChange={setShipping}
+            placeholder="?"
+            aria-label={`Frete ${offer.store}`}
+            onCommit={(c) => saveShipping(c, c !== 0 && offer.shippingNote === "grátis" ? null : offer.shippingNote)}
+          />
         </div>
+        <button
+          type="button"
+          onClick={setFree}
+          title="Marcar frete grátis"
+          className="h-9 px-1 text-[11px] font-bold uppercase tracking-[1px] text-cm-muted hover:text-cm-ink focus-visible:outline focus-visible:outline-2 focus-visible:outline-cm-ink"
+        >
+          grátis
+        </button>
       </div>
+      {!offer.shippingKnown ? (
+        <span className="text-[11px] font-bold text-cm-warn">frete desconhecido</span>
+      ) : (
+        offer.shippingNote && <span className="truncate text-[11px] font-light text-cm-muted">{offer.shippingNote}</span>
+      )}
+    </div>
+  );
 
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-2">
-        <Field label="Preço cheio">
-          <span className="text-[13px] tabular-nums text-ink-muted">{formatBRL(offer.latest?.listCents)}</span>
-        </Field>
-        <Field label="Pix / à vista">
-          <span className="text-[13px] font-medium tabular-nums text-ink">
-            {formatBRL(offer.effectiveCashCents)}
-            {offer.cashSource && <span className="ml-1.5 text-[10.5px] font-normal text-ink-faint">{CASH_LABEL[offer.cashSource]}</span>}
-          </span>
-        </Field>
-        <Field label={offer.shippingKnown ? "Frete" : "Frete (desconhecido)"} warn={!offer.shippingKnown}>
-          <div className="flex items-center gap-1">
-            <div className="w-[100px]">
-              <BrlInput
-                value={shipping}
-                onChange={setShipping}
-                className="h-8 text-[13px]"
-                placeholder="?"
-                aria-label={`Frete ${offer.store}`}
-                onCommit={(c) => saveShipping(c, note)}
-              />
-            </div>
-            <Button size="sm" variant="ghost" className="h-8 px-2 text-[12px]" onClick={setFree} title="Frete grátis">
-              grátis
-            </Button>
-            <Input
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-              onBlur={() => saveShipping(shipping, note)}
-              placeholder="Obs. (ex.: 7 dias)"
-              className="h-8 w-[130px] px-2 text-[12px]"
-              aria-label={`Observação do frete ${offer.store}`}
-            />
+  const finalCell = (
+    <div className="flex min-w-0 flex-col items-end">
+      <span className={cn("text-[18px] font-bold tabular-nums", isBest ? "text-cm-accent" : "text-cm-ink")}>{formatBRL(offer.finalCents)}</span>
+      <span className="truncate text-[11px] font-light text-cm-muted">
+        {isBest ? "melhor · " : ""}
+        {formatRelative(offer.lastCheckedAt ?? offer.latest?.lastSeenAt)}
+      </span>
+    </div>
+  );
+
+  const statusCell = (
+    <div className="flex min-w-0 items-center">
+      <CmTag variant={st.variant} title={offer.lastError ? `${st.hint}. ${offer.lastError}` : st.hint}>
+        {st.label}
+      </CmTag>
+    </div>
+  );
+
+  const menu: ReactNode = (
+    <CmMenu>
+      <CmMenuTrigger asChild>
+        <CmIconButton size="sm" className="border-transparent bg-transparent" aria-label={`Mais ações da ${offer.store}`}>
+          <MoreHorizontal className="h-4 w-4" />
+        </CmIconButton>
+      </CmMenuTrigger>
+      <CmMenuContent>
+        {offer.url && <CmMenuItem onSelect={openOffer}>Abrir na loja</CmMenuItem>}
+        {offer.adapter !== "manual" && offer.status !== "blocked" && (
+          <CmMenuItem onSelect={() => run(() => comprasRefresh(null, offer.id), "Atualização pedida")}>Atualizar agora</CmMenuItem>
+        )}
+        <CmMenuItem onSelect={() => setManualOpen(true)}>Informar preço digitado</CmMenuItem>
+        <CmMenuItem onSelect={() => setEditOpen(true)}>Editar loja ou link</CmMenuItem>
+        <CmMenuSeparator />
+        <CmMenuItem danger onSelect={() => setDeleteOpen(true)}>
+          Remover loja
+        </CmMenuItem>
+      </CmMenuContent>
+    </CmMenu>
+  );
+
+  return (
+    <li className={cn("border-b border-cm-hairline px-2 py-4", isBest && "bg-cm-soft", offer.status === "paused" && "opacity-60")}>
+      {narrow ? (
+        <div className="flex flex-col gap-3">
+          <div className="grid items-start gap-x-3" style={{ gridTemplateColumns: "minmax(0,1fr) auto 32px" }}>
+            {storeCell}
+            {finalCell}
+            {menu}
           </div>
-        </Field>
-
-        <div className="ml-auto flex items-center gap-0.5">
-          {offer.url && (
-            <Button size="icon" variant="ghost" title="Abrir na loja" aria-label="Abrir na loja" onClick={openOffer}>
-              <ExternalLink className="h-4 w-4" />
-            </Button>
-          )}
-          {offer.adapter !== "manual" && offer.status !== "blocked" && (
-            <Button size="icon" variant="ghost" title="Atualizar agora" aria-label="Atualizar agora" onClick={() => run(() => comprasRefresh(null, offer.id), "Atualização pedida")}>
-              <RefreshCw className="h-4 w-4" />
-            </Button>
-          )}
-          <Button size="icon" variant="ghost" title="Informar preço manual" aria-label="Informar preço manual" onClick={() => setManualOpen(true)}>
-            <DollarSign className="h-4 w-4" />
-          </Button>
-          <Button size="icon" variant="ghost" title="Editar oferta" aria-label="Editar oferta" onClick={() => setEditOpen(true)}>
-            <Pencil className="h-4 w-4" />
-          </Button>
-          <Button size="icon" variant="ghost" title="Remover oferta" aria-label="Remover oferta" onClick={() => setDeleteOpen(true)}>
-            <Trash2 className="h-4 w-4" />
-          </Button>
+          <div className="flex flex-wrap items-start gap-x-6 gap-y-3">
+            <LabeledCell label="Pix / à vista">{pixCell}</LabeledCell>
+            <LabeledCell label="Frete">{shipCell}</LabeledCell>
+            <LabeledCell label="Status">{statusCell}</LabeledCell>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="grid items-center gap-x-3" style={{ gridTemplateColumns: WIDE_COLS }}>
+          {storeCell}
+          {pixCell}
+          {shipCell}
+          {finalCell}
+          {statusCell}
+          {menu}
+        </div>
+      )}
 
       <ManualPriceDialog open={manualOpen} offer={offer} onClose={() => setManualOpen(false)} onDone={onChanged} />
       <OfferEditDialog open={editOpen} offer={offer} onClose={() => setEditOpen(false)} onDone={onChanged} />
       <ConfirmDialog
         open={deleteOpen}
-        title="Remover oferta?"
-        description={`A oferta da ${offer.store} e seu histórico de preços serão apagados.`}
+        title="Remover loja?"
+        description={`A loja ${offer.store} e o histórico de preços dela serão apagados.`}
         confirmLabel="Remover"
         busy={busy}
         onCancel={() => setDeleteOpen(false)}
         onConfirm={async () => {
           setBusy(true);
-          await run(() => comprasDeleteOffer(offer.id), "Oferta removida");
+          await run(() => comprasDeleteOffer(offer.id), "Loja removida");
           setBusy(false);
           setDeleteOpen(false);
         }}
       />
-    </div>
+    </li>
   );
 }
 
-function Field({ label, warn, children }: { label: string; warn?: boolean; children: React.ReactNode }) {
+function LabeledCell({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="flex flex-col gap-1">
-      <span className={cn("text-[10.5px] font-semibold uppercase tracking-wide", warn ? "text-warning" : "text-ink-faint")}>{label}</span>
+    <div className="flex min-w-0 flex-col gap-1">
+      <span className="text-[11px] font-bold uppercase tracking-[1.5px] text-cm-muted">{label}</span>
       {children}
     </div>
   );

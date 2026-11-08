@@ -9,3 +9,6 @@ export { VerdictChip, type Verdict } from "./VerdictChip";
 export { CmDialog, CmDialogContent, CmDialogDescription, CmDialogFooter, CmDialogTitle } from "./CmDialog";
 export { CmMenu, CmMenuContent, CmMenuItem, CmMenuLabel, CmMenuSeparator, CmMenuTrigger } from "./CmMenu";
 export { Sparkline } from "./Sparkline";
+export { CmTextarea } from "./CmInput";
+export { CmField } from "./CmField";
+export { CmCheckbox, CmSelect } from "./CmSelect";

@@ -1,18 +1,9 @@
 import { useEffect, useState } from "react";
 import { FolderOpen, Link2 } from "lucide-react";
 import { comprasSaveImageFromUrl, comprasSetImageFromFile, pickImageFile } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { errorMessage } from "./format";
-import { Field } from "./shared";
+import { CmButton, CmDialog, CmDialogContent, CmDialogDescription, CmDialogTitle, CmField, CmInput } from "./ui";
 
 interface ImageDialogProps {
   open: boolean;
@@ -51,24 +42,24 @@ export function ImageDialog({ open, itemId, onClose, onDone }: ImageDialogProps)
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Trocar imagem</DialogTitle>
-          <DialogDescription>JPEG, PNG ou WebP, até 5 MB.</DialogDescription>
-        </DialogHeader>
-        <Button variant="secondary" onClick={fromFile} disabled={busy}>
+    <CmDialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+      <CmDialogContent className="max-w-md">
+        <div className="flex flex-col gap-2 pr-8">
+          <CmDialogTitle>Trocar imagem</CmDialogTitle>
+          <CmDialogDescription>JPEG, PNG ou WebP, até 5 MB.</CmDialogDescription>
+        </div>
+        <CmButton onClick={fromFile} disabled={busy}>
           <FolderOpen className="h-4 w-4" /> Escolher arquivo…
-        </Button>
-        <Field label="Ou cole o endereço da imagem">
+        </CmButton>
+        <CmField label="Ou cole o endereço da imagem" htmlFor="image-url">
           <div className="flex gap-2">
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/foto.jpg" />
-            <Button onClick={() => run(() => comprasSaveImageFromUrl(itemId, url.trim()))} disabled={busy || !url.trim()}>
+            <CmInput id="image-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…/foto.jpg" />
+            <CmButton variant="strong" className="h-12" onClick={() => run(() => comprasSaveImageFromUrl(itemId, url.trim()))} disabled={busy || !url.trim()}>
               <Link2 className="h-4 w-4" /> Baixar
-            </Button>
+            </CmButton>
           </div>
-        </Field>
-      </DialogContent>
-    </Dialog>
+        </CmField>
+      </CmDialogContent>
+    </CmDialog>
   );
 }

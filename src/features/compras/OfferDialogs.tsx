@@ -1,22 +1,21 @@
 import { useEffect, useState } from "react";
 import { comprasAddManualPrice, comprasUpsertOffer } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import type { OfferView } from "@/types";
-import { BrlInput } from "./BrlInput";
 import { errorMessage } from "./format";
 import { toOffer } from "./offerActions";
-import { Field } from "./shared";
+import {
+  CmBrlInput,
+  CmButton,
+  CmCheckbox,
+  CmDialog,
+  CmDialogContent,
+  CmDialogDescription,
+  CmDialogFooter,
+  CmDialogTitle,
+  CmField,
+  CmInput,
+} from "./ui";
 
 interface BaseProps {
   open: boolean;
@@ -55,43 +54,44 @@ export function ManualPriceDialog({ open, offer, onClose, onDone }: BaseProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Preço manual · {offer.store}</DialogTitle>
-          <DialogDescription>Registra o preço que você viu na loja agora.</DialogDescription>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Preço cheio">
-            <BrlInput value={list} onChange={setList} autoFocus />
-          </Field>
-          <Field label="Preço Pix / à vista">
-            <BrlInput value={cash} onChange={setCash} />
-          </Field>
-          <label className="col-span-2 flex items-center gap-2 text-[13px] text-ink-muted">
-            <Switch checked={inStock} onCheckedChange={setInStock} /> Em estoque
-          </label>
+    <CmDialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+      <CmDialogContent className="max-w-md">
+        <div className="flex flex-col gap-2 pr-8">
+          <CmDialogTitle>Preço digitado · {offer.store}</CmDialogTitle>
+          <CmDialogDescription>Registra o preço que você viu na loja agora.</CmDialogDescription>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <CmField label="Preço cheio" htmlFor="manual-list">
+            <CmBrlInput id="manual-list" value={list} onChange={setList} autoFocus />
+          </CmField>
+          <CmField label="Preço Pix / à vista" htmlFor="manual-cash">
+            <CmBrlInput id="manual-cash" value={cash} onChange={setCash} />
+          </CmField>
+          <CmCheckbox checked={inStock} onChange={setInStock} className="sm:col-span-2">
+            Em estoque
+          </CmCheckbox>
+        </div>
+        <CmDialogFooter>
+          <CmButton onClick={onClose} disabled={busy}>
             Cancelar
-          </Button>
-          <Button onClick={submit} disabled={busy || (list == null && cash == null)}>
+          </CmButton>
+          <CmButton variant="strong" onClick={submit} disabled={busy || (list == null && cash == null)}>
             {busy ? "Salvando…" : "Registrar preço"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </CmButton>
+        </CmDialogFooter>
+      </CmDialogContent>
+    </CmDialog>
   );
 }
 
-/** Edits offer metadata: store name, link, title, Pix discount and pause. */
+/** Edits offer metadata: store name, link, title, Pix discount, shipping note and pause. */
 export function OfferEditDialog({ open, offer, onClose, onDone }: BaseProps) {
   const { toast } = useToast();
   const [store, setStore] = useState("");
   const [url, setUrl] = useState("");
   const [title, setTitle] = useState("");
   const [pix, setPix] = useState("");
+  const [shipNote, setShipNote] = useState("");
   const [paused, setPaused] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -101,6 +101,7 @@ export function OfferEditDialog({ open, offer, onClose, onDone }: BaseProps) {
     setUrl(offer.url ?? "");
     setTitle(offer.title ?? "");
     setPix(offer.pixDiscountPct != null ? String(offer.pixDiscountPct) : "");
+    setShipNote(offer.shippingNote ?? "");
     setPaused(offer.status === "paused");
   }, [open, offer]);
 
@@ -116,9 +117,10 @@ export function OfferEditDialog({ open, offer, onClose, onDone }: BaseProps) {
         url: url.trim() || null,
         title: title.trim() || null,
         pixDiscountPct: pct != null && Number.isFinite(pct) ? pct : null,
+        shippingNote: shipNote.trim() || null,
         status,
       });
-      toast({ variant: "success", title: "Oferta atualizada" });
+      toast({ variant: "success", title: "Loja atualizada" });
       onDone();
       onClose();
     } catch (e) {
@@ -129,37 +131,38 @@ export function OfferEditDialog({ open, offer, onClose, onDone }: BaseProps) {
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>Editar oferta</DialogTitle>
-        </DialogHeader>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Loja">
-            <Input value={store} onChange={(e) => setStore(e.target.value)} />
-          </Field>
-          <Field label="Desconto Pix (%)" hint="Vazio usa o padrão da loja.">
-            <Input inputMode="decimal" value={pix} onChange={(e) => setPix(e.target.value)} placeholder="Ex.: 5" />
-          </Field>
-          <Field label="Link" className="col-span-2">
-            <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
-          </Field>
-          <Field label="Título na loja" className="col-span-2">
-            <Input value={title} onChange={(e) => setTitle(e.target.value)} />
-          </Field>
-          <label className="col-span-2 flex items-center gap-2 text-[13px] text-ink-muted">
-            <Switch checked={paused} onCheckedChange={setPaused} /> Pausar verificação desta oferta
-          </label>
+    <CmDialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+      <CmDialogContent aria-describedby={undefined}>
+        <CmDialogTitle className="pr-8">Editar loja</CmDialogTitle>
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <CmField label="Loja" htmlFor="offer-store">
+            <CmInput id="offer-store" value={store} onChange={(e) => setStore(e.target.value)} />
+          </CmField>
+          <CmField label="Desconto Pix (%)" htmlFor="offer-pix" hint="Vazio usa o padrão da loja.">
+            <CmInput id="offer-pix" inputMode="decimal" value={pix} onChange={(e) => setPix(e.target.value)} placeholder="Ex.: 5" />
+          </CmField>
+          <CmField label="Link" htmlFor="offer-url" className="sm:col-span-2">
+            <CmInput id="offer-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://…" />
+          </CmField>
+          <CmField label="Título na loja" htmlFor="offer-title" className="sm:col-span-2">
+            <CmInput id="offer-title" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </CmField>
+          <CmField label="Observação do frete" htmlFor="offer-ship-note" className="sm:col-span-2">
+            <CmInput id="offer-ship-note" value={shipNote} onChange={(e) => setShipNote(e.target.value)} placeholder="Ex.: 7 dias" />
+          </CmField>
+          <CmCheckbox checked={paused} onChange={setPaused} className="sm:col-span-2">
+            Pausar a verificação desta loja
+          </CmCheckbox>
         </div>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onClose} disabled={busy}>
+        <CmDialogFooter>
+          <CmButton onClick={onClose} disabled={busy}>
             Cancelar
-          </Button>
-          <Button onClick={submit} disabled={busy}>
+          </CmButton>
+          <CmButton variant="strong" onClick={submit} disabled={busy}>
             {busy ? "Salvando…" : "Salvar"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </CmButton>
+        </CmDialogFooter>
+      </CmDialogContent>
+    </CmDialog>
   );
 }

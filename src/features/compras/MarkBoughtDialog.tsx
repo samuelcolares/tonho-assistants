@@ -1,22 +1,21 @@
 import { useEffect, useState } from "react";
 import { comprasMarkBought } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import type { ItemView } from "@/types";
-import { BrlInput } from "./BrlInput";
 import { dateInputToIso, errorMessage, todayInputValue } from "./format";
 import { formatBRL } from "./money";
-import { Field } from "./shared";
+import {
+  CmBrlInput,
+  CmButton,
+  CmDialog,
+  CmDialogContent,
+  CmDialogDescription,
+  CmDialogFooter,
+  CmDialogTitle,
+  CmField,
+  CmInput,
+  CmTextarea,
+} from "./ui";
 
 interface MarkBoughtDialogProps {
   view: ItemView | null;
@@ -73,48 +72,47 @@ export function MarkBoughtDialog({ view, onClose, onDone }: MarkBoughtDialogProp
   const total = paid != null ? paid * qty + (shipping ?? 0) : null;
 
   return (
-    <Dialog open={view != null} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent>
+    <CmDialog open={view != null} onOpenChange={(o) => !o && !busy && onClose()}>
+      <CmDialogContent>
         {view && (
           <>
-            <DialogHeader>
-              <DialogTitle>Marcar como comprado</DialogTitle>
-              <DialogDescription className="line-clamp-2">{view.item.name}</DialogDescription>
-            </DialogHeader>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="Preço pago (un.)">
-                <BrlInput value={paid} onChange={setPaid} autoFocus />
-              </Field>
-              <Field label="Frete à parte (total)" hint="O preço sugerido já inclui o frete da oferta.">
-                <BrlInput value={shipping} onChange={setShipping} />
-              </Field>
-              <Field label="Loja">
-                <Input value={store} onChange={(e) => setStore(e.target.value)} placeholder="Ex.: KaBuM" />
-              </Field>
-              <Field label="Data da compra">
-                <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
-              </Field>
-              <Field label="Observações" className="col-span-2">
-                <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
-              </Field>
+            <div className="flex flex-col gap-2 pr-8">
+              <CmDialogTitle>Marcar como comprado</CmDialogTitle>
+              <CmDialogDescription className="line-clamp-2">{view.item.name}</CmDialogDescription>
+            </div>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <CmField label="Preço pago (un.)" htmlFor="bought-paid">
+                <CmBrlInput id="bought-paid" value={paid} onChange={setPaid} autoFocus />
+              </CmField>
+              <CmField label="Frete à parte (total)" htmlFor="bought-ship" hint="O preço sugerido já inclui o frete da loja.">
+                <CmBrlInput id="bought-ship" value={shipping} onChange={setShipping} />
+              </CmField>
+              <CmField label="Loja" htmlFor="bought-store">
+                <CmInput id="bought-store" value={store} onChange={(e) => setStore(e.target.value)} placeholder="Ex.: KaBuM" />
+              </CmField>
+              <CmField label="Data da compra" htmlFor="bought-date">
+                <CmInput id="bought-date" type="date" value={date} onChange={(e) => setDate(e.target.value)} />
+              </CmField>
+              <CmField label="Observações" htmlFor="bought-notes" className="sm:col-span-2">
+                <CmTextarea id="bought-notes" value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              </CmField>
             </div>
             {total != null && (
-              <p className="text-[13px] text-ink-muted">
-                Total desta compra ({qty} un. + frete):{" "}
-                <strong className="tabular-nums text-ink">{formatBRL(total)}</strong>
+              <p className="text-[14px] font-light text-cm-body">
+                Total desta compra ({qty} un. + frete): <strong className="font-bold tabular-nums text-cm-ink">{formatBRL(total)}</strong>
               </p>
             )}
-            <DialogFooter>
-              <Button variant="ghost" onClick={onClose} disabled={busy}>
+            <CmDialogFooter>
+              <CmButton onClick={onClose} disabled={busy}>
                 Cancelar
-              </Button>
-              <Button onClick={submit} disabled={busy || paid == null}>
+              </CmButton>
+              <CmButton variant="strong" onClick={submit} disabled={busy || paid == null}>
                 {busy ? "Salvando…" : "Confirmar compra"}
-              </Button>
-            </DialogFooter>
+              </CmButton>
+            </CmDialogFooter>
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </CmDialogContent>
+    </CmDialog>
   );
 }

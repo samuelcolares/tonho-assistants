@@ -1,12 +1,13 @@
 import * as React from "react";
 import { cn } from "@/lib/utils";
 
-export type CmButtonVariant = "primary-outline" | "strong" | "ghost" | "danger-ghost";
+export type CmButtonVariant = "primary-outline" | "strong" | "ghost" | "danger" | "danger-ghost";
 
 const VARIANTS: Record<CmButtonVariant, string> = {
   "primary-outline": "border border-cm-ink bg-transparent text-cm-ink hover:bg-cm-ink hover:text-cm-canvas",
   strong: "border border-cm-ink bg-cm-ink text-cm-canvas hover:bg-cm-body-strong",
   ghost: "border border-transparent bg-transparent text-cm-muted hover:text-cm-ink",
+  danger: "border border-cm-danger bg-transparent text-cm-danger hover:bg-cm-danger hover:text-cm-canvas",
   "danger-ghost": "border border-transparent bg-transparent text-cm-danger hover:bg-cm-danger/10",
 };
 

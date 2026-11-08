@@ -1,18 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { ImageOff } from "lucide-react";
-import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import type { ItemView } from "@/types";
+import { CmButton, CmDialog, CmDialogContent, CmDialogDescription, CmDialogFooter, CmDialogTitle } from "./ui";
 
 /** Label + control stack used by every form in the module. */
 export function Field({
@@ -80,25 +72,25 @@ interface ConfirmDialogProps {
   onCancel: () => void;
 }
 
-/** Destructive confirmation dialog. */
+/** Destructive confirmation dialog (Compras look). */
 export function ConfirmDialog({ open, title, description, confirmLabel, busy, onConfirm, onCancel }: ConfirmDialogProps) {
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onCancel()}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription>{description}</DialogDescription>
-        </DialogHeader>
-        <DialogFooter>
-          <Button variant="ghost" onClick={onCancel} disabled={busy}>
+    <CmDialog open={open} onOpenChange={(o) => !o && !busy && onCancel()}>
+      <CmDialogContent className="max-w-md">
+        <div className="flex flex-col gap-2 pr-8">
+          <CmDialogTitle>{title}</CmDialogTitle>
+          <CmDialogDescription>{description}</CmDialogDescription>
+        </div>
+        <CmDialogFooter>
+          <CmButton onClick={onCancel} disabled={busy}>
             Cancelar
-          </Button>
-          <Button variant="destructive" onClick={onConfirm} disabled={busy}>
+          </CmButton>
+          <CmButton variant="danger" onClick={onConfirm} disabled={busy}>
             {busy ? "Aguarde…" : confirmLabel}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+          </CmButton>
+        </CmDialogFooter>
+      </CmDialogContent>
+    </CmDialog>
   );
 }
 

@@ -14,8 +14,8 @@ CmInput.displayName = "CmInput";
 interface CmBrlInputProps {
   value: number | null;
   onChange: (cents: number | null) => void;
-  /** `lg` = 64px / 30px bold (hero price field). */
-  size?: "md" | "lg";
+  /** `lg` = 64px / 30px bold (hero price field); `sm` = 36px inline field. */
+  size?: "sm" | "md" | "lg";
   id?: string;
   autoFocus?: boolean;
   placeholder?: string;
@@ -27,11 +27,20 @@ interface CmBrlInputProps {
 /** BRL field (same parsing as BrlInput) in the Compras look. */
 export function CmBrlInput({ size = "md", ...props }: CmBrlInputProps) {
   const lg = size === "lg";
+  const sm = size === "sm";
   return (
     <BrlInput
       {...props}
-      prefixClassName={cn("left-4 font-bold text-cm-muted", lg ? "text-[18px]" : "text-[13px]")}
-      className={cn(BASE, "font-bold", lg ? "h-16 pl-14 text-[30px]" : "h-12 pl-11 text-[14px]")}
+      prefixClassName={cn(sm ? "left-2.5" : "left-4", "font-bold text-cm-muted", lg ? "text-[18px]" : sm ? "text-[11px]" : "text-[13px]")}
+      className={cn(BASE, "font-bold", lg ? "h-16 pl-14 text-[30px]" : sm ? "h-9 pl-8 pr-2 text-[13px]" : "h-12 pl-11 text-[14px]")}
     />
   );
 }
+
+/** Multi-line text field, same look as CmInput. */
+export const CmTextarea = React.forwardRef<HTMLTextAreaElement, React.TextareaHTMLAttributes<HTMLTextAreaElement>>(
+  ({ className, rows = 3, ...props }, ref) => (
+    <textarea ref={ref} rows={rows} className={cn("min-h-[96px] resize-y py-3 text-[14px]", BASE, className)} {...props} />
+  )
+);
+CmTextarea.displayName = "CmTextarea";
