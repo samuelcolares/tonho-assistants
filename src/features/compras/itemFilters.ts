@@ -1,9 +1,9 @@
 import type { ItemView } from "@/types";
 import { alertStatus } from "./alertCalc";
 
-export type ItemTab = "target" | "falling" | "noAlert" | "noPrice" | "all" | "bought";
+export type ItemTab = "target" | "falling" | "noAlert" | "noPrice" | "all" | "bought" | "archived";
 
-export const TAB_ORDER: ItemTab[] = ["target", "falling", "noAlert", "noPrice", "all", "bought"];
+export const TAB_ORDER: ItemTab[] = ["target", "falling", "noAlert", "noPrice", "all", "bought", "archived"];
 
 export const TAB_LABEL: Record<ItemTab, string> = {
   target: "No preço",
@@ -12,6 +12,7 @@ export const TAB_LABEL: Record<ItemTab, string> = {
   noPrice: "Sem preço",
   all: "Todos",
   bought: "Comprados",
+  archived: "Arquivados",
 };
 
 export const TAB_HINT: Record<ItemTab, string> = {
@@ -19,8 +20,9 @@ export const TAB_HINT: Record<ItemTab, string> = {
   falling: "Itens cujo preço está baixando",
   noAlert: "Itens não comprados sem aviso ligado",
   noPrice: "Itens que ainda não têm nenhum preço",
-  all: "Todos os itens, comprados ou não",
+  all: "Todos os itens, comprados ou não (sem os arquivados)",
   bought: "Itens já comprados",
+  archived: "Itens guardados fora da lista: sem aviso, sem coleta de preço e fora do orçamento",
 };
 
 export function hasPrice(v: ItemView): boolean {
@@ -42,13 +44,16 @@ export function matchesTab(v: ItemView, tab: ItemTab): boolean {
       return !bought && !hasPrice(v);
     case "bought":
       return bought;
+    case "archived":
+      return v.item.archived;
     default:
-      return true;
+      return !v.item.archived;
   }
 }
 
-export function tabCounts(items: ItemView[]): Record<ItemTab, number> {
-  const out = { target: 0, falling: 0, noAlert: 0, noPrice: 0, all: 0, bought: 0 } as Record<ItemTab, number>;
-  for (const v of items) for (const t of TAB_ORDER) if (matchesTab(v, t)) out[t] += 1;
+/** `items` = active items; `archived` = the archived ones (only counted for their own tab). */
+export function tabCounts(items: ItemView[], archived: ItemView[] = []): Record<ItemTab, number> {
+  const out = { target: 0, falling: 0, noAlert: 0, noPrice: 0, all: 0, bought: 0, archived: archived.length } as Record<ItemTab, number>;
+  for (const v of items) for (const t of TAB_ORDER) if (t !== "archived" && matchesTab(v, t)) out[t] += 1;
   return out;
 }

@@ -10,6 +10,9 @@ import { uniqueCategories } from "./calc";
 import { errorMessage } from "./format";
 import { blankItem, createOfferFromDraft } from "./offerActions";
 import { draftIsValid, OfferSourceForm, type OfferDraft } from "./OfferSourceForm";
+import { PriorityChips } from "./PriorityChips";
+import { PRIORITY_DEFAULT } from "./rooms";
+import { RoomInput } from "./RoomInput";
 import { suggestTemplate } from "./templates";
 import {
   CmBrlInput,
@@ -30,6 +33,8 @@ interface AddItemDialogProps {
   open: boolean;
   items: ItemView[];
   templates: CategoryTemplate[];
+  /** Room suggestions (settings list + rooms in use). */
+  rooms: string[];
   /** Pre-selected category (e.g. the active filter). */
   defaultCategory?: string;
   onClose: () => void;
@@ -56,11 +61,13 @@ function CmField({
   );
 }
 
-export function AddItemDialog({ open, items, templates, defaultCategory, onClose, onCreated }: AddItemDialogProps) {
+export function AddItemDialog({ open, items, templates, rooms, defaultCategory, onClose, onCreated }: AddItemDialogProps) {
   const { toast } = useToast();
   const [step, setStep] = useState<1 | 2>(1);
   const [name, setName] = useState("");
   const [category, setCategory] = useState("");
+  const [room, setRoom] = useState<string | null>(null);
+  const [priority, setPriority] = useState<number>(PRIORITY_DEFAULT);
   const [qty, setQty] = useState("1");
   const [budget, setBudget] = useState<number | null>(null);
   const [alertCents, setAlertCents] = useState<number | null>(null);
@@ -76,6 +83,8 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
     setStep(1);
     setName("");
     setCategory(defaultCategory ?? "");
+    setRoom(null);
+    setPriority(PRIORITY_DEFAULT);
     setQty("1");
     setBudget(null);
     setAlertCents(null);
@@ -99,6 +108,8 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
         blankItem({
           name: name.trim(),
           category: category.trim(),
+          room: room?.trim() ? room.trim() : null,
+          priority,
           qty: qtyNum,
           budgetUnitCents: budget,
           templateId,
@@ -164,6 +175,12 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
                   ))}
                 </div>
               )}
+            </CmField>
+            <CmField label="Cômodo" className="col-span-3" hint="Opcional. Para agrupar a lista por cômodo.">
+              <RoomInput value={room} options={rooms} onChange={setRoom} />
+            </CmField>
+            <CmField label="Prioridade" className="col-span-3" hint="Padrão: em breve.">
+              <PriorityChips compact value={priority} onChange={setPriority} />
             </CmField>
             <CmField label="Quantidade" className="col-span-2">
               <CmInput type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)} />

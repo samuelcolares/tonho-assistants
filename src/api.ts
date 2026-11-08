@@ -192,8 +192,13 @@ export function onWatcherStatus(cb: (status: string) => void) {
 
 // --- Compras para Casa ---
 
-export function comprasListItems(): Promise<ItemView[]> {
-  return invoke("compras_list_items");
+/** Archived items are left out unless `includeArchived`. */
+export function comprasListItems(includeArchived = false): Promise<ItemView[]> {
+  return invoke("compras_list_items", { includeArchived });
+}
+
+export function comprasArchiveItem(id: string, archived: boolean): Promise<ItemView> {
+  return invoke("compras_archive_item", { id, archived });
 }
 
 export function comprasGetItem(id: string): Promise<ItemView> {

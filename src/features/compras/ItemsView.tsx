@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowUpDown, Bell, Plus, Search, ShoppingCart } from "lucide-react";
-import { comprasBulkSetTarget, comprasDeleteItem, comprasGetSettings, comprasUnmarkBought } from "@/api";
+import { comprasArchiveItem, comprasBulkSetTarget, comprasDeleteItem, comprasGetSettings, comprasUnmarkBought } from "@/api";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { ItemView } from "@/types";
@@ -10,6 +10,7 @@ import { errorMessage, normalizeText } from "./format";
 import { hasPrice, matchesTab, TAB_HINT, TAB_LABEL, TAB_ORDER, tabCounts, type ItemTab } from "./itemFilters";
 import { ItemsTable, type ItemGroup } from "./ItemsTable";
 import { MarkBoughtDialog } from "./MarkBoughtDialog";
+import { roomGroupKey } from "./rooms";
 import { loadPref, savePref } from "./storage";
 import {
   CmButton,
@@ -28,8 +29,7 @@ import {
 import type { ComprasData } from "./useComprasData";
 
 type SortKey = "default" | "name" | "price" | "delta" | "priority";
-/** P7 adds "room" here; the toggle below is already built from this list. */
-type GroupBy = "category";
+type GroupBy = "room" | "category";
 
 interface Prefs {
   tab: ItemTab;
@@ -51,7 +51,10 @@ const SORT_LABELS: Record<SortKey, string> = {
 };
 const SORT_KEYS = Object.keys(SORT_LABELS) as SortKey[];
 
-const GROUP_MODES: { key: GroupBy; label: string }[] = [{ key: "category", label: "Categoria" }];
+const GROUP_MODES: { key: GroupBy; label: string }[] = [
+  { key: "room", label: "Cômodo" },
+  { key: "category", label: "Categoria" },
+];
 
 /** Drops stale/invalid stored values so a bad localStorage entry can never break the screen. */
 function sanitize(p: Prefs): Prefs {
@@ -59,7 +62,7 @@ function sanitize(p: Prefs): Prefs {
     tab: TAB_ORDER.includes(p.tab) ? p.tab : DEFAULT_PREFS.tab,
     sortKey: SORT_KEYS.includes(p.sortKey) ? p.sortKey : "default",
     sortDir: p.sortDir === "desc" ? "desc" : "asc",
-    groupBy: GROUP_MODES.some((m) => m.key === p.groupBy) ? p.groupBy : "category",
+    groupBy: GROUP_MODES.some((m) => m.key === p.groupBy) ? p.groupBy : DEFAULT_PREFS.groupBy,
     collapsed: Array.isArray(p.collapsed) ? p.collapsed.filter((c) => typeof c === "string") : [],
   };
 }
@@ -113,13 +116,17 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
   const patch = (p: Partial<Prefs>) => setPrefs((prev) => ({ ...prev, ...p }));
 
   const all = items ?? [];
-  const counts = useMemo(() => tabCounts(all), [all]);
+  const archivedItems = data.archived;
+  const counts = useMemo(() => tabCounts(all, archivedItems), [all, archivedItems]);
   const toBuy = useMemo(() => all.filter((v) => !v.item.bought), [all]);
   const withAlertOn = useMemo(() => toBuy.filter((v) => v.alert?.enabled === true).length, [toBuy]);
 
+  // The ARQUIVADOS tab reads the archived list; every other tab reads the active items.
+  const source = prefs.tab === "archived" ? archivedItems : all;
+
   const groups = useMemo<ItemGroup[]>(() => {
     const q = normalizeText(query);
-    const filtered = all.filter((v) => {
+    const filtered = source.filter((v) => {
       if (!matchesTab(v, prefs.tab)) return false;
       if (q) {
         const hay = normalizeText(
@@ -129,21 +136,28 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
       }
       return true;
     });
+    const byRoom = prefs.groupBy === "room";
     const order: string[] = [];
-    const map = new Map<string, ItemView[]>();
+    const map = new Map<string, ItemGroup>();
     for (const v of filtered) {
-      const key = v.item.category;
-      if (!map.has(key)) {
-        map.set(key, []);
+      const room = v.item.room?.trim() ?? "";
+      const key = byRoom ? roomGroupKey(room) : v.item.category;
+      let g = map.get(key);
+      if (!g) {
+        g = { key, title: byRoom ? room || "Sem cômodo" : v.item.category || "Sem categoria", items: [] };
+        map.set(key, g);
         order.push(key);
       }
-      map.get(key)!.push(v);
+      g.items.push(v);
     }
-    return order.map((c) => ({
-      category: c,
-      items: map.get(c)!.slice().sort((a, b) => compare(a, b, prefs.sortKey, prefs.sortDir)),
-    }));
-  }, [all, prefs.tab, prefs.sortKey, prefs.sortDir, query]);
+    // Rooms: items without a room form the last group.
+    const noRoom = roomGroupKey("");
+    const keys = byRoom ? [...order.filter((k) => k !== noRoom), ...order.filter((k) => k === noRoom)] : order;
+    return keys.map((k) => {
+      const g = map.get(k)!;
+      return { ...g, items: g.items.slice().sort((a, b) => compare(a, b, prefs.sortKey, prefs.sortDir)) };
+    });
+  }, [source, prefs.tab, prefs.groupBy, prefs.sortKey, prefs.sortDir, query]);
 
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
 
@@ -179,10 +193,10 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
   };
   const collapsed = useMemo(() => new Set(prefs.collapsed), [prefs.collapsed]);
 
-  const toggleGroup = (c: string) => {
+  const toggleGroup = (key: string) => {
     const next = new Set(prefs.collapsed);
-    if (next.has(c)) next.delete(c);
-    else next.add(c);
+    if (next.has(key)) next.delete(key);
+    else next.add(key);
     patch({ collapsed: Array.from(next) });
   };
 
@@ -197,6 +211,16 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
       await reload();
     } catch (e) {
       toast({ variant: "danger", title: "Não foi possível desfazer", description: errorMessage(e) });
+    }
+  };
+
+  const handleArchive = async (v: ItemView, archived: boolean) => {
+    try {
+      await comprasArchiveItem(v.item.id, archived);
+      toast({ title: archived ? "Item arquivado" : "Item desarquivado", description: v.item.name });
+      await reload();
+    } catch (e) {
+      toast({ variant: "danger", title: archived ? "Não foi possível arquivar" : "Não foi possível desarquivar", description: errorMessage(e) });
     }
   };
 
@@ -324,7 +348,7 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
         </div>
       </div>
 
-      {all.length === 0 ? (
+      {all.length === 0 && archivedItems.length === 0 ? (
         <EmptyList onAdd={() => onAdd()} message="Nenhum item ainda. Importe a planilha pelo Painel ou adicione manualmente." />
       ) : shown === 0 ? (
         <EmptyList
@@ -333,7 +357,9 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
               ? "Nenhum item corresponde à busca."
               : prefs.tab === "target"
                 ? "Nenhum item chegou no preço desejado ainda."
-                : "Nenhum item nesta aba."
+                : prefs.tab === "archived"
+                  ? "Nenhum item arquivado. Use “Arquivar” no menu do item para tirá-lo da lista sem apagar."
+                  : "Nenhum item nesta aba."
           }
         />
       ) : (
@@ -345,6 +371,7 @@ export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
           onToggleBought={handleToggleBought}
           onAlert={setAlertTarget}
           onDelete={setDeleteTarget}
+          onArchive={handleArchive}
         />
       )}
 

@@ -185,9 +185,13 @@ export interface ComprasItem {
   specs: Record<string, string>;
   templateId: string | null;
   modelToken: string | null;
-  priority: number; // 0 normal, 1 high
+  priority: number; // 0 "Um dia", 1 "Em breve", 2 "Agora"
   createdAt: string;
   updatedAt: string;
+  /** Free-text room ("Sala"); null = none. */
+  room: string | null;
+  /** Archived items leave the lists, budget, alerts and polling. Changed only by comprasArchiveItem. */
+  archived: boolean;
 }
 
 export interface ComprasOffer {

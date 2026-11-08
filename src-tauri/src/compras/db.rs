@@ -128,8 +128,16 @@ INSERT INTO alert_rules(item_id, enabled, target_cents, notify_new_low, updated_
   SELECT id, 1, target_cents, 1, updated_at FROM items WHERE target_cents IS NOT NULL;
 ";
 
+/// v3: cômodo e arquivamento. Prioridade passa a ter 3 níveis (0 "Um dia", 1 "Em breve", 2 "Agora"):
+/// o que era 0 (normal) vira 1 e o que era 1 (alta) vira 2.
+const SCHEMA_V3: &str = "
+ALTER TABLE items ADD COLUMN room TEXT;
+ALTER TABLE items ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+UPDATE items SET priority = priority + 1 WHERE priority IN (0, 1);
+";
+
 /// Versão do esquema que este aplicativo entende.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 /// Caminho do arquivo do banco (None para banco em memória).
 fn db_file_path(conn: &Connection) -> Option<std::path::PathBuf> {
@@ -183,10 +191,17 @@ pub fn migrate(conn: &Connection) -> Result<(), String> {
         tx.execute_batch(SCHEMA_V2).map_err(dberr)?;
         tx.pragma_update(None, "user_version", 2).map_err(dberr)?;
         tx.commit().map_err(dberr)?;
-        if version == 1 {
-            // dados antigos: itens que já estão no alvo não devem disparar aviso de uma vez no primeiro poll
-            let _ = prime_alert_rules(conn);
-        }
+    }
+    if version < 3 {
+        let tx = conn.unchecked_transaction().map_err(dberr)?;
+        tx.execute_batch(SCHEMA_V3).map_err(dberr)?;
+        tx.pragma_update(None, "user_version", 3).map_err(dberr)?;
+        tx.commit().map_err(dberr)?;
+    }
+    if version == 1 {
+        // dados antigos: itens que já estão no alvo não devem disparar aviso de uma vez no primeiro poll
+        // (depois da v3, pois `load_views` lê as colunas novas)
+        let _ = prime_alert_rules(conn);
     }
     seed_templates(conn)
 }
@@ -332,7 +347,7 @@ pub fn upsert_template(conn: &Connection, mut t: CategoryTemplate) -> Result<Cat
 
 // ---------------------------------------------------------------- itens
 
-const ITEM_COLS: &str = "id, category, name, qty, budget_unit_cents, target_cents, notes, bought, image_path, specs, template_id, model_token, priority, created_at, updated_at";
+const ITEM_COLS: &str = "id, category, name, qty, budget_unit_cents, target_cents, notes, bought, image_path, specs, template_id, model_token, priority, created_at, updated_at, room, archived";
 
 fn row_item(r: &Row) -> rusqlite::Result<ComprasItem> {
     let specs: String = r.get(9)?;
@@ -352,6 +367,8 @@ fn row_item(r: &Row) -> rusqlite::Result<ComprasItem> {
         priority: r.get(12)?,
         created_at: r.get(13)?,
         updated_at: r.get(14)?,
+        room: r.get(15)?,
+        archived: r.get::<_, i64>(16)? != 0,
     })
 }
 
@@ -362,10 +379,10 @@ pub fn get_item(conn: &Connection, id: &str) -> Result<Option<ComprasItem>, Stri
 fn insert_item_row(conn: &Connection, i: &ComprasItem) -> Result<(), String> {
     let specs = serde_json::to_string(&i.specs).map_err(|e| e.to_string())?;
     conn.execute(
-        &format!("INSERT INTO items({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15)"),
+        &format!("INSERT INTO items({ITEM_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17)"),
         params![
             i.id, i.category, i.name, i.qty, i.budget_unit_cents, i.target_cents, i.notes, i.bought as i64,
-            i.image_path, specs, i.template_id, i.model_token, i.priority, i.created_at, i.updated_at
+            i.image_path, specs, i.template_id, i.model_token, i.priority, i.created_at, i.updated_at, i.room, i.archived as i64
         ],
     )
     .map_err(dberr)?;
@@ -393,7 +410,8 @@ fn validate_item(i: &mut ComprasItem) -> Result<(), String> {
     }
     i.model_token = i.model_token.take().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
     i.template_id = i.template_id.take().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
-    i.priority = i.priority.clamp(0, 1);
+    i.priority = i.priority.clamp(0, 2);
+    i.room = i.room.take().map(|r| r.trim().to_string()).filter(|r| !r.is_empty());
     Ok(())
 }
 
@@ -404,6 +422,7 @@ pub fn upsert_item(conn: &Connection, mut item: ComprasItem, now: &str) -> Resul
         item.created_at = now.to_string();
         item.updated_at = now.to_string();
         item.bought = false;
+        item.archived = false;
         item.image_path = None;
         if item.template_id.is_none() {
             item.template_id = templates::template_for_name(&item.name).map(|s| s.to_string());
@@ -419,13 +438,13 @@ pub fn upsert_item(conn: &Connection, mut item: ComprasItem, now: &str) -> Resul
     }
     let existing = get_item(conn, &item.id)?.ok_or_else(|| "Item não encontrado.".to_string())?;
     let specs = serde_json::to_string(&item.specs).map_err(|e| e.to_string())?;
-    // `bought` e `image_path` só mudam por comandos próprios.
+    // `bought`, `archived` e `image_path` só mudam por comandos próprios.
     let tx = conn.unchecked_transaction().map_err(dberr)?;
     tx.execute(
-        "UPDATE items SET category=?2, name=?3, qty=?4, budget_unit_cents=?5, target_cents=?6, notes=?7, specs=?8, template_id=?9, model_token=?10, priority=?11, updated_at=?12 WHERE id=?1",
+        "UPDATE items SET category=?2, name=?3, qty=?4, budget_unit_cents=?5, target_cents=?6, notes=?7, specs=?8, template_id=?9, model_token=?10, priority=?11, room=?13, updated_at=?12 WHERE id=?1",
         params![
             item.id, item.category, item.name, item.qty, item.budget_unit_cents, item.target_cents, item.notes, specs,
-            item.template_id, item.model_token, item.priority, now
+            item.template_id, item.model_token, item.priority, now, item.room
         ],
     )
     .map_err(dberr)?;
@@ -434,6 +453,7 @@ pub fn upsert_item(conn: &Connection, mut item: ComprasItem, now: &str) -> Resul
     }
     tx.commit().map_err(dberr)?;
     item.bought = existing.bought;
+    item.archived = existing.archived;
     item.image_path = existing.image_path;
     item.created_at = existing.created_at;
     item.updated_at = now.to_string();
@@ -565,6 +585,19 @@ pub fn apply_rule_edit(conn: &Connection, incoming: AlertRule, now: &str) -> Res
 }
 
 /// Define o alvo de vários itens numa transação (mantém `notify_new_low` e liga o aviso). Itens inexistentes são pulados.
+/// Alvos para a ação em lote: só itens pedidos, não comprados, não arquivados e com preço atual.
+pub fn bulk_targets(views: &[ItemView], item_ids: &[String], pct_below_current: f64) -> Vec<(String, i64)> {
+    let wanted: std::collections::HashSet<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+    views
+        .iter()
+        .filter(|v| wanted.contains(v.item.id.as_str()) && !v.item.bought && !v.item.archived)
+        .filter_map(|v| {
+            let cur = v.best.as_ref()?.final_cents?;
+            Some((v.item.id.clone(), ((cur as f64) * (1.0 - pct_below_current / 100.0)).round() as i64))
+        })
+        .collect()
+}
+
 pub fn bulk_set_targets(conn: &Connection, targets: &[(String, i64)], now: &str) -> Result<usize, String> {
     let tx = conn.unchecked_transaction().map_err(dberr)?;
     let mut n = 0;
@@ -652,7 +685,7 @@ pub fn list_events(conn: &Connection, limit: i64, unseen_only: bool) -> Result<V
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {EVENT_COLS} FROM alert_events e JOIN items i ON i.id=e.item_id
-             WHERE (?1=0 OR e.seen=0) ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?2"
+             WHERE i.archived=0 AND (?1=0 OR e.seen=0) ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?2"
         ))
         .map_err(dberr)?;
     let rows = stmt.query_map(params![unseen_only as i64, limit.clamp(1, 500)], row_event).map_err(dberr)?;
@@ -700,7 +733,7 @@ pub fn take_pending_events(conn: &Connection) -> Result<Vec<AlertEvent>, String>
     let rows: Vec<(AlertEvent, bool)> = {
         let mut stmt = tx
             .prepare(&format!(
-                "SELECT {EVENT_COLS} FROM alert_events e JOIN items i ON i.id=e.item_id WHERE e.pending=1 ORDER BY e.created_at, e.rowid"
+                "SELECT {EVENT_COLS} FROM alert_events e JOIN items i ON i.id=e.item_id WHERE e.pending=1 AND i.archived=0 ORDER BY e.created_at, e.rowid"
             ))
             .map_err(dberr)?;
         let rs = stmt.query_map([], row_event).map_err(dberr)?;
@@ -1040,6 +1073,7 @@ pub fn due_offers(conn: &Connection, now: &str) -> Result<Vec<(String, String)>,
         .prepare(
             "SELECT id, url FROM offers
              WHERE adapter != 'manual' AND url IS NOT NULL AND status NOT IN ('paused','manual')
+               AND item_id NOT IN (SELECT id FROM items WHERE archived=1)
                AND (next_poll_at IS NULL OR next_poll_at <= ?1)
              ORDER BY COALESCE(next_poll_at, '') LIMIT 500",
         )
@@ -1053,6 +1087,7 @@ pub fn mark_due(conn: &Connection, item_id: Option<&str>, offer_id: Option<&str>
     conn.execute(
         "UPDATE offers SET next_poll_at=?1
          WHERE adapter != 'manual' AND url IS NOT NULL AND status != 'paused'
+           AND item_id NOT IN (SELECT id FROM items WHERE archived=1)
            AND (?2 IS NULL OR id=?2) AND (?3 IS NULL OR item_id=?3)",
         params![now, offer_id, item_id],
     )
@@ -1063,7 +1098,8 @@ pub fn mark_due(conn: &Connection, item_id: Option<&str>, offer_id: Option<&str>
 /// Marca para consulta imediata (e zera falhas) as ofertas automáticas de uma loja.
 pub fn mark_store_due(conn: &Connection, store: &str, now: &str) -> Result<usize, String> {
     conn.execute(
-        "UPDATE offers SET next_poll_at = ?2, fail_count = 0 WHERE store = ?1 AND url IS NOT NULL AND adapter != 'manual' AND status != 'paused'",
+        "UPDATE offers SET next_poll_at = ?2, fail_count = 0 WHERE store = ?1 AND url IS NOT NULL AND adapter != 'manual' AND status != 'paused'
+         AND item_id NOT IN (SELECT id FROM items WHERE archived=1)",
         params![store, now],
     )
     .map_err(dberr)
@@ -1371,6 +1407,26 @@ pub fn load_views(
     Ok(views)
 }
 
+/// Arquiva/desarquiva. Itens arquivados ficam fora das listas padrão, do orçamento, dos avisos e da coleta.
+pub fn set_archived(conn: &Connection, id: &str, archived: bool, now: &str) -> Result<(), String> {
+    let n = conn
+        .execute("UPDATE items SET archived=?2, updated_at=?3 WHERE id=?1", params![id, archived as i64, now])
+        .map_err(dberr)?;
+    if n == 0 {
+        return Err("Item não encontrado.".to_string());
+    }
+    Ok(())
+}
+
+/// Tira os arquivados, a menos que `include_archived`.
+pub fn visible_views(views: Vec<ItemView>, include_archived: bool) -> Vec<ItemView> {
+    if include_archived {
+        views
+    } else {
+        views.into_iter().filter(|v| !v.item.archived).collect()
+    }
+}
+
 pub fn history(
     conn: &Connection,
     item_id: &str,
@@ -1415,6 +1471,7 @@ pub fn history(
 // ---------------------------------------------------------------- orçamento
 
 pub fn budget_summary(views: &[ItemView]) -> BudgetSummary {
+    let views: Vec<&ItemView> = views.iter().filter(|v| !v.item.archived).collect();
     let mut s = BudgetSummary {
         total_budget_cents: 0,
         bought_cents: 0,
@@ -1534,9 +1591,11 @@ pub fn import_items(conn: &Connection, rows: &[SheetItem], now: &str, mut report
                     specs: templates::initial_specs(template_id.as_deref(), &row.name),
                     template_id,
                     model_token: None,
-                    priority: 0,
+                    priority: 1,
                     created_at: now.to_string(),
                     updated_at: now.to_string(),
+                    room: None,
+                    archived: false,
                 };
                 insert_item_row(&tx, &it)?;
                 report.inserted += 1;
@@ -1600,9 +1659,11 @@ mod tests {
                 specs: BTreeMap::new(),
                 template_id: None,
                 model_token: None,
-                priority: 0,
+                priority: 1,
                 created_at: String::new(),
                 updated_at: String::new(),
+                room: None,
+                archived: false,
             },
             NOW,
         )
@@ -2292,6 +2353,18 @@ mod tests {
                 assert_eq!(now, *n, "{t} mudou");
             }
         }
+        // v1 -> v3: colunas novas, tudo desarquivado, sem cômodo, prioridade mapeada (0->1, 1->2)
+        let v3_ok = v == SCHEMA_VERSION;
+        assert!(v3_ok, "versão final {v}");
+        let archived: i64 = c.query_row("SELECT COUNT(*) FROM items WHERE archived<>0 OR room IS NOT NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(archived, 0);
+        let mapped: i64 = c.query_row("SELECT COUNT(*) FROM items WHERE priority NOT IN (1, 2)", [], |r| r.get(0)).unwrap();
+        assert_eq!(mapped, 0, "prioridade fora de 1..2 logo após a migração");
+        eprintln!(
+            "DEPOIS: prioridade Em breve={} Agora={}",
+            c.query_row::<i64, _, _>("SELECT COUNT(*) FROM items WHERE priority=1", [], |r| r.get(0)).unwrap(),
+            c.query_row::<i64, _, _>("SELECT COUNT(*) FROM items WHERE priority=2", [], |r| r.get(0)).unwrap()
+        );
         eprintln!("DEPOIS: alert_rules={}", count(&c, "alert_rules"));
         eprintln!("DEPOIS: alert_events={}", count(&c, "alert_events"));
         let primed: i64 = c.query_row("SELECT COUNT(*) FROM alert_rules WHERE last_alert_cents IS NOT NULL", [], |r| r.get(0)).unwrap();
@@ -2413,9 +2486,11 @@ mod tests {
                 specs: BTreeMap::new(),
                 template_id: None,
                 model_token: None,
-                priority: 0,
+                priority: 1,
                 created_at: String::new(),
                 updated_at: String::new(),
+                room: None,
+                archived: false,
             },
             NOW,
         )
@@ -2497,5 +2572,230 @@ mod tests {
         set_snooze(&c, &a.id, Some("2026-12-01T00:00:00Z"), NOW).unwrap();
         apply_rule_edit(&c, AlertRule { item_id: a.id.clone(), target_cents: Some(60_000), ..Default::default() }, NOW).unwrap();
         assert_eq!(get_rule(&c, &a.id).unwrap().unwrap().snooze_until.as_deref(), Some("2026-12-01T00:00:00Z"));
+    }
+
+    // ---------------------------------------------------------------- v3: cômodo, prioridade, arquivo
+
+    /// Banco no formato da v2 (como a P1-P6 deixou), com prioridades 0 e 1.
+    fn seed_v2(c: &Connection) {
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        c.execute_batch(SCHEMA_V1).unwrap();
+        c.execute_batch(SCHEMA_V2).unwrap();
+        c.pragma_update(None, "user_version", 2).unwrap();
+        let t = "2026-10-01T12:00:00Z";
+        for (id, name, prio, target) in [("a", "Geladeira", 0, Some(250_000)), ("b", "Cooktop", 1, None), ("c", "Sofá", 0, None)] {
+            c.execute(
+                "INSERT INTO items(id, category, name, qty, budget_unit_cents, target_cents, notes, bought, specs, priority, created_at, updated_at)
+                 VALUES (?1,'Casa',?2,1,100000,?3,'',0,'{}',?4,?5,?5)",
+                params![id, name, target, prio, t],
+            )
+            .unwrap();
+        }
+        c.execute("INSERT INTO offers(id, item_id, store, adapter, status, created_at) VALUES ('o1','a','Loja','manual','manual',?1)", params![t]).unwrap();
+        c.execute(
+            "INSERT INTO observations(id, offer_id, cash_cents, in_stock, source, confirmed, first_seen_at, last_seen_at)
+             VALUES ('b1','o1',200000,1,'manual',1,?1,?1)",
+            params![t],
+        )
+        .unwrap();
+        c.execute("INSERT INTO alert_rules(item_id, enabled, target_cents, notify_new_low, updated_at) VALUES ('a',1,250000,1,?1)", params![t]).unwrap();
+    }
+
+    #[test]
+    fn migrates_v2_to_v3_adds_columns_and_maps_priority() {
+        let c = Connection::open_in_memory().unwrap();
+        seed_v2(&c);
+        migrate(&c).unwrap();
+        let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 3);
+        assert_eq!((count(&c, "items"), count(&c, "offers"), count(&c, "observations"), count(&c, "alert_rules")), (3, 1, 1, 1));
+        // 0 (normal) -> 1 "Em breve"; 1 (alta) -> 2 "Agora"
+        assert_eq!(get_item(&c, "a").unwrap().unwrap().priority, 1);
+        assert_eq!(get_item(&c, "b").unwrap().unwrap().priority, 2);
+        assert_eq!(get_item(&c, "c").unwrap().unwrap().priority, 1);
+        for id in ["a", "b", "c"] {
+            let i = get_item(&c, id).unwrap().unwrap();
+            assert_eq!((i.room, i.archived), (None, false));
+        }
+        // rodar de novo não remapeia a prioridade
+        migrate(&c).unwrap();
+        assert_eq!(get_item(&c, "b").unwrap().unwrap().priority, 2);
+        assert_eq!(get_item(&c, "a").unwrap().unwrap().priority, 1);
+    }
+
+    #[test]
+    fn v1_to_v3_in_one_go_maps_priority_once_and_primes_rules() {
+        let c = Connection::open_in_memory().unwrap();
+        seed_v1(&c); // todos com prioridade 1 (alta)
+        c.execute("UPDATE items SET target_cents=210000 WHERE id='i2'", []).unwrap();
+        migrate(&c).unwrap();
+        let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, 3);
+        assert_eq!(get_item(&c, "i1").unwrap().unwrap().priority, 2);
+        // a "preparação" das regras (pós v2) continua funcionando com as colunas da v3
+        assert_eq!(get_rule(&c, "i2").unwrap().unwrap().last_alert_cents, Some(200_000));
+    }
+
+    #[test]
+    fn file_db_v2_is_backed_up_before_v3() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("compras.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            seed_v2(&c);
+        }
+        let c = open_file(&path).unwrap();
+        let baks: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("compras.db.bak-v2-"))
+            .collect();
+        assert_eq!(baks.len(), 1);
+        let bak = Connection::open(&baks[0]).unwrap();
+        let bv: i64 = bak.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(bv, 2);
+        // a cópia ainda é v2 (sem as colunas novas, prioridade original)
+        assert!(bak.prepare("SELECT room FROM items").is_err());
+        let p: i64 = bak.query_row("SELECT priority FROM items WHERE id='b'", [], |r| r.get(0)).unwrap();
+        assert_eq!(p, 1);
+        assert_eq!(get_item(&c, "b").unwrap().unwrap().priority, 2);
+    }
+
+    #[test]
+    fn room_and_priority_validation_and_roundtrip() {
+        let c = mem();
+        let it = new_item(&c, "Sofá", 1, None);
+        assert_eq!(it.priority, 1);
+        let mut e = it.clone();
+        e.room = Some("  Sala  ".into());
+        e.priority = 9;
+        let s = upsert_item(&c, e, NOW).unwrap();
+        assert_eq!((s.room.as_deref(), s.priority), (Some("Sala"), 2));
+        assert_eq!(get_item(&c, &it.id).unwrap().unwrap().room.as_deref(), Some("Sala"));
+        let mut e = s.clone();
+        e.room = Some("   ".into());
+        e.priority = -3;
+        let s = upsert_item(&c, e, NOW).unwrap();
+        assert_eq!((s.room, s.priority), (None, 0));
+        // JSON antigo (sem room/archived/priority) carrega com os padrões
+        let old: ComprasItem = serde_json::from_str(r#"{"category":"X","name":"Y"}"#).unwrap();
+        assert_eq!((old.room, old.archived, old.priority), (None, false, 1));
+    }
+
+    #[test]
+    fn archived_flag_is_set_by_command_only_and_hidden_by_default() {
+        let c = mem();
+        let a = new_item(&c, "Geladeira", 1, Some(100_000));
+        let b = new_item(&c, "Sofá", 1, Some(50_000));
+        set_archived(&c, &a.id, true, NOW).unwrap();
+        assert!(set_archived(&c, "nope", true, NOW).is_err());
+        // salvar o item pela UI (archived=false no payload) não desarquiva
+        let mut e = a.clone();
+        e.notes = "x".into();
+        let s = upsert_item(&c, e, NOW).unwrap();
+        assert!(s.archived);
+        assert!(get_item(&c, &a.id).unwrap().unwrap().archived);
+        // criar com archived=true no payload é ignorado
+        let mut n = b.clone();
+        n.id = String::new();
+        n.name = "Mesa".into();
+        n.archived = true;
+        assert!(!upsert_item(&c, n, NOW).unwrap().archived);
+        // lista padrão esconde; com includeArchived volta tudo
+        let all = views(&c);
+        assert_eq!(all.len(), 3);
+        let shown = visible_views(all.clone(), false);
+        assert_eq!(shown.len(), 2);
+        assert!(shown.iter().all(|v| v.item.id != a.id));
+        assert_eq!(visible_views(all, true).len(), 3);
+        set_archived(&c, &a.id, false, NOW).unwrap();
+        assert_eq!(visible_views(views(&c), false).len(), 3);
+    }
+
+    #[test]
+    fn archived_items_are_out_of_budget() {
+        let c = mem();
+        let _a = new_item(&c, "Geladeira", 1, Some(444_900));
+        let b = new_item(&c, "Sofá", 2, Some(100_000));
+        set_archived(&c, &b.id, true, NOW).unwrap();
+        let s = budget_summary(&views(&c));
+        assert_eq!((s.items_total, s.total_budget_cents, s.remaining_budget_cents), (1, 444_900, 444_900));
+        assert_eq!(s.by_category.len(), 1);
+        assert_eq!(s.by_category[0].budget_cents, 444_900);
+    }
+
+    #[test]
+    fn archived_offers_are_not_polled() {
+        let c = mem();
+        let a = new_item(&c, "SSD", 1, None);
+        let b = new_item(&c, "Monitor", 1, None);
+        let oa = new_offer(&c, &a.id, Some("https://loja.exemplo.com/a"), "Amazon");
+        let ob = new_offer(&c, &b.id, Some("https://loja.exemplo.com/b"), "Amazon");
+        let due = |c: &Connection| -> Vec<String> {
+            let mut v: Vec<String> = due_offers(c, NOW).unwrap().into_iter().map(|d| d.0).collect();
+            v.sort();
+            v
+        };
+        let mut both = vec![oa.id.clone(), ob.id.clone()];
+        both.sort();
+        assert_eq!(due(&c), both);
+        set_archived(&c, &a.id, true, NOW).unwrap();
+        assert_eq!(due(&c), vec![ob.id.clone()]);
+        // "atualizar tudo" / por loja não acorda oferta arquivada
+        c.execute("UPDATE offers SET next_poll_at='2099-01-01T00:00:00Z'", []).unwrap();
+        assert!(due(&c).is_empty());
+        assert_eq!(mark_due(&c, None, None, NOW).unwrap(), 1);
+        assert_eq!(due(&c), vec![ob.id.clone()]);
+        c.execute("UPDATE offers SET next_poll_at='2099-01-01T00:00:00Z'", []).unwrap();
+        assert_eq!(mark_store_due(&c, "Amazon", NOW).unwrap(), 1);
+        assert_eq!(due(&c), vec![ob.id.clone()]);
+        // desarquivar volta a coletar
+        set_archived(&c, &a.id, false, NOW).unwrap();
+        assert_eq!(mark_due(&c, None, None, NOW).unwrap(), 2);
+        assert_eq!(due(&c), both);
+    }
+
+    #[test]
+    fn archived_items_are_skipped_by_bulk_target() {
+        let c = mem();
+        let a = new_item(&c, "Geladeira", 1, None);
+        let b = new_item(&c, "Sofá", 1, None);
+        for it in [&a, &b] {
+            let o = new_offer(&c, &it.id, None, "Loja");
+            add_manual_price(&c, &o.id, None, Some(100_000), Some(true), "2026-11-05T10:00:00Z").unwrap();
+        }
+        set_archived(&c, &b.id, true, NOW).unwrap();
+        let ids = vec![a.id.clone(), b.id.clone()];
+        let t = bulk_targets(&views(&c), &ids, 10.0);
+        assert_eq!(t, vec![(a.id.clone(), 90_000)]);
+    }
+
+    #[test]
+    fn archived_items_do_not_show_alert_events() {
+        let c = mem();
+        let a = new_item(&c, "Geladeira", 1, None);
+        let ev = AlertEvent {
+            id: "e1".into(),
+            item_id: a.id.clone(),
+            offer_id: None,
+            kind: AlertKind::Target,
+            price_cents: 1,
+            prev_cents: None,
+            reason: String::new(),
+            created_at: NOW.into(),
+            pending: true,
+            seen: false,
+            delivered_desktop: false,
+            delivered_discord: false,
+            title: String::new(),
+            item_name: String::new(),
+        };
+        insert_event(&c, &ev).unwrap();
+        assert_eq!(list_events(&c, 10, true).unwrap().len(), 1);
+        set_archived(&c, &a.id, true, NOW).unwrap();
+        assert!(list_events(&c, 10, false).unwrap().is_empty());
+        assert!(take_pending_events(&c).unwrap().is_empty());
+        set_archived(&c, &a.id, false, NOW).unwrap();
+        assert_eq!(list_events(&c, 10, false).unwrap().len(), 1);
     }
 }

@@ -374,6 +374,7 @@ pub fn run() {
             compras::compras_get_item,
             compras::compras_upsert_item,
             compras::compras_delete_item,
+            compras::compras_archive_item,
             compras::compras_mark_bought,
             compras::compras_unmark_bought,
             compras::compras_upsert_offer,

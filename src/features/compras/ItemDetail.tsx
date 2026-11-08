@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Bell, Camera, ChevronDown, ChevronRight, MoreHorizontal, RefreshCw } from "lucide-react";
 import {
+  comprasArchiveItem,
   comprasDeleteItem,
   comprasGetItem,
   comprasRefresh,
@@ -14,7 +15,7 @@ import type { CategoryTemplate, ItemView } from "@/types";
 import { AddOfferDialog } from "./AddOfferDialog";
 import { AlertDialog } from "./AlertDialog";
 import { alertStatus } from "./alertCalc";
-import { adviceFor, bestCaption, isSnoozed, lastAlertText, priorityLabel, snoozeUntilIso } from "./detailCalc";
+import { adviceFor, bestCaption, isSnoozed, lastAlertText, metaLine, snoozeUntilIso } from "./detailCalc";
 import { errorMessage, formatDateTime, formatDay } from "./format";
 import { ImageDialog } from "./ImageDialog";
 import { ItemForm } from "./ItemForm";
@@ -48,6 +49,8 @@ interface ItemDetailProps {
   id: string;
   templates: CategoryTemplate[];
   categories: string[];
+  /** Room suggestions (settings list + rooms in use). */
+  rooms: string[];
   onBack: () => void;
   /** Called after any change so the list/dashboard can refresh. */
   onChanged: () => void;
@@ -90,7 +93,7 @@ function SaveIndicator({ status, detail, onRetry }: { status: SaveStatus; detail
   );
 }
 
-export function ItemDetail({ id, templates, categories, onBack, onChanged }: ItemDetailProps) {
+export function ItemDetail({ id, templates, categories, rooms, onBack, onChanged }: ItemDetailProps) {
   const { toast } = useToast();
   const [rootRef, width] = useContainerWidth<HTMLDivElement>();
   const narrow = width < NARROW_MAX;
@@ -189,6 +192,16 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
       await changed();
     } catch (e) {
       toast({ variant: "danger", title: "Não foi possível desfazer", description: errorMessage(e) });
+    }
+  };
+
+  const archive = async (archived: boolean) => {
+    try {
+      await comprasArchiveItem(id, archived);
+      toast({ title: archived ? "Item arquivado" : "Item desarquivado", description: view.item.name });
+      await changed();
+    } catch (e) {
+      toast({ variant: "danger", title: archived ? "Não foi possível arquivar" : "Não foi possível desarquivar", description: errorMessage(e) });
     }
   };
 
@@ -305,6 +318,7 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
                 ) : (
                   <CmMenuItem onSelect={() => setBoughtOpen(true)}>Marcar comprado</CmMenuItem>
                 )}
+                <CmMenuItem onSelect={() => void archive(!view.item.archived)}>{view.item.archived ? "Desarquivar" : "Arquivar"}</CmMenuItem>
                 <CmMenuSeparator />
                 <CmMenuItem danger onSelect={() => setDeleteOpen(true)}>
                   Excluir
@@ -331,7 +345,7 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
         <div className="flex min-w-0 flex-col justify-between gap-5 p-6">
           <div className="flex min-w-0 flex-col gap-3">
             <Eyebrow className="truncate">
-              {item.category || "Sem categoria"} · {priorityLabel(item.priority)}
+              {metaLine({ ...item, archived: view.item.archived })}
             </Eyebrow>
             <h1 className="break-words text-[28px] font-bold uppercase leading-[1.15] text-cm-ink">{item.name || "Sem nome"}</h1>
             {specsLine && <p className="line-clamp-2 text-[14px] font-light leading-5 text-cm-body">{specsLine}</p>}
@@ -448,7 +462,7 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
       {/* Fields save on their own: 600 ms after typing stops, at once on blur or choice. */}
       <div onBlur={() => void auto.flush(true)}>
         <Section title="Sobre o item">
-          <ItemForm draft={item} categories={categories} onChange={auto.patch} />
+          <ItemForm draft={item} categories={categories} rooms={rooms} onChange={auto.patch} />
           <div className="flex flex-col gap-5">
             <CmField label="Modelo de especificações" htmlFor="item-template" className="max-w-sm">
               <CmSelect

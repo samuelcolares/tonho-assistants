@@ -215,11 +215,28 @@ fn flush_pending(app: &AppHandle) {
 // ---------------------------------------------------------------- comandos
 
 #[tauri::command(async)]
-pub fn compras_list_items(app: AppHandle) -> Result<Vec<ItemView>, String> {
+pub fn compras_list_items(app: AppHandle, include_archived: Option<bool>) -> Result<Vec<ItemView>, String> {
     let st = state(&app)?;
     let conn = st.conn()?;
     let settings = db::load_settings(&conn);
-    db::load_views(&conn, None, &settings, today(), local_tz(), &st.dir)
+    let views = db::load_views(&conn, None, &settings, today(), local_tz(), &st.dir)?;
+    Ok(db::visible_views(views, include_archived.unwrap_or(false)))
+}
+
+/// Arquiva (ou desarquiva) um item: some das listas, do orçamento, dos avisos e da coleta, sem apagar nada.
+#[tauri::command(async)]
+pub fn compras_archive_item(app: AppHandle, id: String, archived: bool) -> Result<ItemView, String> {
+    let st = state(&app)?;
+    let view = {
+        let conn = st.conn()?;
+        db::set_archived(&conn, &id, archived, &now_s())?;
+        view_of(&conn, &st, &id)?
+    };
+    if !archived {
+        st.wake(false);
+    }
+    emit_updated(&app, Some(&id));
+    Ok(view)
 }
 
 #[tauri::command(async)]
@@ -388,16 +405,8 @@ pub fn compras_bulk_set_target(app: AppHandle, item_ids: Vec<String>, pct_below_
     let n = {
         let conn = st.conn()?;
         let settings = db::load_settings(&conn);
-        let wanted: std::collections::HashSet<&str> = item_ids.iter().map(|s| s.as_str()).collect();
         let views = db::load_views(&conn, None, &settings, today(), local_tz(), &st.dir)?;
-        let targets: Vec<(String, i64)> = views
-            .iter()
-            .filter(|v| wanted.contains(v.item.id.as_str()) && !v.item.bought)
-            .filter_map(|v| {
-                let cur = v.best.as_ref()?.final_cents?;
-                Some((v.item.id.clone(), ((cur as f64) * (1.0 - pct_below_current / 100.0)).round() as i64))
-            })
-            .collect();
+        let targets = db::bulk_targets(&views, &item_ids, pct_below_current);
         db::bulk_set_targets(&conn, &targets, &now_s())?
     };
     emit_updated(&app, None);
@@ -922,9 +931,11 @@ mod tests {
                 specs: Default::default(),
                 template_id: None,
                 model_token: None,
-                priority: 0,
+                priority: 1,
                 created_at: String::new(),
                 updated_at: String::new(),
+                room: None,
+                archived: false,
             },
             "2026-11-05T12:00:00Z",
         )

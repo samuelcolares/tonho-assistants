@@ -5,6 +5,7 @@ import { uniqueCategories } from "./calc";
 import { Dashboard } from "./Dashboard";
 import { ItemDetail } from "./ItemDetail";
 import { ItemsView } from "./ItemsView";
+import { roomOptions } from "./rooms";
 import { SettingsDialog } from "./SettingsDialog";
 import { useComprasData } from "./useComprasData";
 
@@ -20,6 +21,7 @@ export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?
   const [settingsOpen, setSettingsOpen] = useState(page === "settings");
 
   const categories = useMemo(() => uniqueCategories(data.items ?? []), [data.items]);
+  const rooms = useMemo(() => roomOptions(data.settingsRooms, data.items ?? []), [data.settingsRooms, data.items]);
   const closeDetail = useCallback(() => setSelectedId(null), []);
   const openAdd = (category?: string) => {
     setAddCategory(category);
@@ -34,6 +36,7 @@ export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?
           id={selectedId}
           templates={data.templates}
           categories={categories}
+          rooms={rooms}
           onBack={closeDetail}
           onChanged={data.reload}
         />
@@ -49,6 +52,7 @@ export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?
         open={addOpen}
         items={data.items ?? []}
         templates={data.templates}
+        rooms={rooms}
         defaultCategory={addCategory}
         onClose={() => setAddOpen(false)}
         onCreated={(id) => {

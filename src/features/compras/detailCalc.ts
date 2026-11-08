@@ -4,6 +4,7 @@ import { alertStatus } from "./alertCalc";
 import { formatRelative } from "./format";
 import { VERDICT_ADVICE } from "./labels";
 import { formatBRL } from "./money";
+import { PRIORITY_LABEL, priorityOf } from "./rooms";
 
 export interface Advice {
   /** Short bold clause ("Bom momento para comprar."). */
@@ -91,4 +92,10 @@ export function lastAlertText(rule: AlertRule | null | undefined, now: number = 
   return `Último aviso: ${price}${formatRelative(rule.lastAlertAt, now)}.`;
 }
 
-export const priorityLabel = (p: number) => (p > 0 ? "Prioridade alta" : "Prioridade normal");
+export const priorityLabel = (p: number) => PRIORITY_LABEL[priorityOf(p)];
+
+/** "Cômodo · Categoria · Prioridade" line shown above the item title (room omitted when empty). */
+export function metaLine(item: { room: string | null; category: string; priority: number; archived?: boolean }): string {
+  const room = item.room?.trim();
+  return [room, item.category || "Sem categoria", priorityLabel(item.priority), item.archived ? "Arquivado" : null].filter(Boolean).join(" · ");
+}

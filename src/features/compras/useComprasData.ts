@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   comprasBudgetSummary,
+  comprasGetSettings,
   comprasListItems,
   comprasListTemplates,
   comprasPollStatus,
@@ -13,7 +14,12 @@ import type { BudgetSummary, CategoryTemplate, ItemView, PollStatus } from "@/ty
 import { errorMessage } from "./format";
 
 export interface ComprasData {
+  /** Active items (archived ones are in `archived`). */
   items: ItemView[] | null;
+  /** Archived items, for the ARQUIVADOS tab. */
+  archived: ItemView[];
+  /** Rooms the user listed in the settings (empty = use the default suggestions). */
+  settingsRooms: string[];
   summary: BudgetSummary | null;
   templates: CategoryTemplate[];
   pollStatus: PollStatus | null;
@@ -24,6 +30,8 @@ export interface ComprasData {
 /** Loads items/summary/templates and keeps them fresh via compras:// events. */
 export function useComprasData(): ComprasData {
   const [items, setItems] = useState<ItemView[] | null>(null);
+  const [archived, setArchived] = useState<ItemView[]>([]);
+  const [settingsRooms, setSettingsRooms] = useState<string[]>([]);
   const [summary, setSummary] = useState<BudgetSummary | null>(null);
   const [templates, setTemplates] = useState<CategoryTemplate[]>([]);
   const [pollStatus, setPollStatus] = useState<PollStatus | null>(null);
@@ -36,9 +44,15 @@ export function useComprasData(): ComprasData {
 
   const reload = useCallback(async () => {
     try {
-      const [i, s] = await Promise.all([comprasListItems(), comprasBudgetSummary()]);
+      const [i, s, cfg] = await Promise.all([
+        comprasListItems(true),
+        comprasBudgetSummary(),
+        comprasGetSettings().catch(() => null), // room suggestions only: never blocks the list
+      ]);
       if (!alive.current) return;
-      setItems(i);
+      if (cfg) setSettingsRooms(cfg.rooms ?? []);
+      setItems(i.filter((v) => !v.item.archived));
+      setArchived(i.filter((v) => v.item.archived));
       setSummary(s);
       setError(null);
     } catch (e) {
@@ -84,5 +98,5 @@ export function useComprasData(): ComprasData {
     };
   }, [reload]);
 
-  return { items, summary, templates, pollStatus, error, reload };
+  return { items, archived, settingsRooms, summary, templates, pollStatus, error, reload };
 }

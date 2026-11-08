@@ -66,6 +66,8 @@ pub struct Input {
     pub now: DateTime<Utc>,
     pub trigger: Trigger,
     pub bought: bool,
+    /// Item arquivado: nunca avisa.
+    pub archived: bool,
     pub rule: Option<AlertRule>,
     /// Melhor oferta elegível (confirmada, status ok|manual, com estoque) já com o novo preço.
     pub candidate: Option<Candidate>,
@@ -123,7 +125,7 @@ fn realert_ok(rule: &AlertRule, last: i64, cur: i64, now: DateTime<Utc>, policy:
 /// Decide o que fazer com o preço atual de um item. Nunca falha nem faz E/S.
 pub fn decide(input: &Input, policy: &Policy) -> Option<Decision> {
     let rule = input.rule.as_ref()?;
-    if !rule.enabled || input.bought || snoozed(rule, input.now) {
+    if !rule.enabled || input.bought || input.archived || snoozed(rule, input.now) {
         return None;
     }
     let cand = input.candidate.as_ref()?;
@@ -425,6 +427,7 @@ pub fn evaluate(conn: &Connection, item_id: &str, trigger: Trigger, before: Opti
         now: ctx.now,
         trigger,
         bought: view.item.bought,
+        archived: view.item.archived,
         rule: view.alert.clone(),
         candidate: candidate_of(&view),
         prev_cents: before.and_then(|b| b.price_cents),
@@ -507,6 +510,7 @@ mod tests {
             now: t0(),
             trigger: Trigger::Poll,
             bought: false,
+            archived: false,
             rule: Some(rule()),
             candidate: Some(cand(95_000)),
             prev_cents: Some(105_000),
@@ -593,6 +597,7 @@ mod tests {
             ("disabled rule: nothing", |i| i.rule.as_mut().unwrap().enabled = false, None),
             ("no rule: nothing", |i| i.rule = None, None),
             ("bought: nothing", |i| i.bought = true, None),
+            ("archived: nothing", |i| i.archived = true, None),
             ("snoozed: nothing", |i| i.rule.as_mut().unwrap().snooze_until = Some(db::ts(t0() + Duration::days(3))), None),
             ("snooze expired: fires", |i| i.rule.as_mut().unwrap().snooze_until = Some(db::ts(t0() - Duration::hours(1))), Some(fire(AlertKind::Target))),
             ("quiet hours: pending, no toast", |i| i.quiet = true, Some(Effect::Event { kind: AlertKind::Target, toast: false, pending: true, also_new_low: false })),
@@ -893,9 +898,11 @@ mod tests {
                 specs: Default::default(),
                 template_id: None,
                 model_token: None,
-                priority: 0,
+                priority: 1,
                 created_at: String::new(),
                 updated_at: String::new(),
+                room: None,
+                archived: false,
             },
             "2026-10-01T12:00:00Z",
         )
@@ -1032,5 +1039,27 @@ mod tests {
         let before = snapshot(&c, &item, &k);
         db::add_manual_price(&c, &offer, None, Some(200_000), Some(true), "2026-11-08T13:00:00Z").unwrap();
         assert!(evaluate(&c, &item, Trigger::Poll, before.as_ref(), &k).unwrap().is_empty());
+    }
+
+    #[test]
+    fn archived_item_never_fires_and_fires_again_after_unarchive() {
+        let (c, item, offer) = setup();
+        let mut s = ComprasSettings::default();
+        s.quiet_start = None;
+        s.quiet_end = None;
+        db::apply_rule_edit(&c, AlertRule { item_id: item.clone(), target_cents: Some(250_000), ..Default::default() }, "2026-11-08T00:00:00Z").unwrap();
+        let k = ctx(&s, 12);
+        let before = snapshot(&c, &item, &k);
+        db::add_manual_price(&c, &offer, None, Some(260_000), Some(true), "2026-11-08T12:00:00Z").unwrap();
+        evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k).unwrap();
+        db::set_archived(&c, &item, true, "2026-11-08T12:00:30Z").unwrap();
+        // cruza o alvo com o item arquivado: nenhum evento, nenhum estado gravado
+        let before = snapshot(&c, &item, &k);
+        db::add_manual_price(&c, &offer, None, Some(240_000), Some(true), "2026-11-08T12:01:00Z").unwrap();
+        assert!(evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k).unwrap().is_empty());
+        assert_eq!(db::list_events(&c, 10, false).unwrap().len(), 0);
+        let n: i64 = c.query_row("SELECT COUNT(*) FROM alert_events", [], |r| r.get(0)).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(db::get_rule(&c, &item).unwrap().unwrap().last_alert_cents, None);
     }
 }

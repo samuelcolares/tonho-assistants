@@ -111,15 +111,26 @@ pub struct ComprasItem {
     pub template_id: Option<String>,
     #[serde(default)]
     pub model_token: Option<String>,
-    #[serde(default)]
+    /// 0 "Um dia", 1 "Em breve", 2 "Agora".
+    #[serde(default = "default_priority")]
     pub priority: i64,
     #[serde(default)]
     pub created_at: String,
     #[serde(default)]
     pub updated_at: String,
+    /// Cômodo (texto livre).
+    #[serde(default)]
+    pub room: Option<String>,
+    /// Arquivado: some das listas, do orçamento, dos avisos e da coleta. Só muda por `compras_archive_item`.
+    #[serde(default)]
+    pub archived: bool,
 }
 
 fn default_qty() -> i64 {
+    1
+}
+
+pub fn default_priority() -> i64 {
     1
 }
 

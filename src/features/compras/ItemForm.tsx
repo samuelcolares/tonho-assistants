@@ -1,18 +1,22 @@
 import type { ComprasItem } from "@/types";
-import { CmBrlInput, CmChip, CmField, CmInput, CmTextarea } from "./ui";
+import { PriorityChips } from "./PriorityChips";
+import { RoomInput } from "./RoomInput";
+import { CmBrlInput, CmField, CmInput, CmTextarea } from "./ui";
 
 interface ItemFormProps {
   draft: ComprasItem;
   categories: string[];
+  /** Room suggestions (settings list + rooms in use). */
+  rooms: string[];
   /** Autosave patch: debounced by default, saved at once with `immediate`. */
   onChange: (patch: Partial<ComprasItem>, immediate?: boolean) => void;
 }
 
 /**
- * Editable core fields of an item (name, category, qty, budget, priority, model code, notes).
+ * Editable core fields of an item (name, category, room, qty, budget, priority, model code, notes).
  * The price target is NOT edited here: it lives in the alert card ("Mudar valor").
  */
-export function ItemForm({ draft, categories, onChange }: ItemFormProps) {
+export function ItemForm({ draft, categories, rooms, onChange }: ItemFormProps) {
   return (
     <div className="grid grid-cols-6 gap-x-4 gap-y-5">
       <CmField label="Nome" htmlFor="item-name" className="col-span-6">
@@ -26,6 +30,9 @@ export function ItemForm({ draft, categories, onChange }: ItemFormProps) {
           ))}
         </datalist>
       </CmField>
+      <CmField label="Cômodo" htmlFor="item-room" className="col-span-3">
+        <RoomInput id="item-room" value={draft.room} options={rooms} onChange={(room) => onChange({ room })} />
+      </CmField>
       <CmField label="Qtd." htmlFor="item-qty" className="col-span-1">
         <CmInput
           id="item-qty"
@@ -38,21 +45,14 @@ export function ItemForm({ draft, categories, onChange }: ItemFormProps) {
       <CmField label="Orçado (un.)" htmlFor="item-budget" className="col-span-2">
         <CmBrlInput id="item-budget" value={draft.budgetUnitCents} onChange={(c) => onChange({ budgetUnitCents: c })} />
       </CmField>
-      <CmField label="Prioridade" className="col-span-2">
-        <div className="flex gap-2" role="group" aria-label="Prioridade">
-          <CmChip className="h-12 flex-1" selected={draft.priority === 0} onClick={() => onChange({ priority: 0 }, true)}>
-            Normal
-          </CmChip>
-          <CmChip className="h-12 flex-1" selected={draft.priority > 0} onClick={() => onChange({ priority: 1 }, true)}>
-            Alta
-          </CmChip>
-        </div>
+      <CmField label="Prioridade" className="col-span-3">
+        <PriorityChips value={draft.priority} onChange={(priority) => onChange({ priority }, true)} />
       </CmField>
       <CmField
         label="Código do modelo (para conferir a loja)"
         htmlFor="item-model"
         hint="Se o título da loja não tiver esse código, o preço aparece como “Conferir”."
-        className="col-span-4"
+        className="col-span-6"
       >
         <CmInput
           id="item-model"

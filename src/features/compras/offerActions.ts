@@ -21,9 +21,11 @@ export function blankItem(partial: Partial<ComprasItem>): ComprasItem {
     specs: {},
     templateId: null,
     modelToken: null,
-    priority: 0,
+    priority: 1,
     createdAt: "",
     updatedAt: "",
+    room: null,
+    archived: false,
     ...partial,
   };
 }

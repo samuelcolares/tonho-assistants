@@ -7,12 +7,15 @@ import { alertStatus } from "./alertCalc";
 import { budgetLine, unitPriceOf } from "./calc";
 import { CmTag } from "./ItemBadges";
 import { formatBRL } from "./money";
+import { PRIORITY_LABEL, priorityOf } from "./rooms";
 import { ItemThumb } from "./shared";
 import { CmIconButton, CmMenu, CmMenuContent, CmMenuItem, CmMenuSeparator, CmMenuTrigger, Sparkline, VerdictChip } from "./ui";
 
 export interface ItemGroup {
-  /** Group key and title (category today; room once P7 lands). */
-  category: string;
+  /** Stable key (collapse state): the category itself, or "room:<name>" when grouping by room. */
+  key: string;
+  /** Header text: category, room, or the "no category/room" label. */
+  title: string;
   items: ItemView[];
 }
 
@@ -42,15 +45,16 @@ function modeFor(width: number): Mode {
 interface ItemsTableProps {
   groups: ItemGroup[];
   collapsed: Set<string>;
-  onToggleGroup: (category: string) => void;
+  onToggleGroup: (key: string) => void;
   onOpen: (id: string) => void;
   onToggleBought: (view: ItemView, bought: boolean) => void;
   /** Opens the "Avisar quando baixar" dialog for an item. */
   onAlert: (view: ItemView) => void;
   onDelete: (view: ItemView) => void;
+  onArchive: (view: ItemView, archived: boolean) => void;
 }
 
-export function ItemsTable({ groups, collapsed, onToggleGroup, onOpen, onToggleBought, onAlert, onDelete }: ItemsTableProps) {
+export function ItemsTable({ groups, collapsed, onToggleGroup, onOpen, onToggleBought, onAlert, onDelete, onArchive }: ItemsTableProps) {
   const ref = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<Mode>("wide");
 
@@ -68,10 +72,10 @@ export function ItemsTable({ groups, collapsed, onToggleGroup, onOpen, onToggleB
   return (
     <div ref={ref} className="w-full min-w-0">
       {groups.map((g) => {
-        const isCollapsed = collapsed.has(g.category);
+        const isCollapsed = collapsed.has(g.key);
         return (
-          <section key={g.category} aria-label={g.category || "Sem categoria"}>
-            <GroupHeader group={g} collapsed={isCollapsed} onToggle={() => onToggleGroup(g.category)} />
+          <section key={g.key} aria-label={g.title}>
+            <GroupHeader group={g} collapsed={isCollapsed} onToggle={() => onToggleGroup(g.key)} />
             {!isCollapsed && (
               <ul>
                 {g.items.map((v) => (
@@ -83,6 +87,7 @@ export function ItemsTable({ groups, collapsed, onToggleGroup, onOpen, onToggleB
                     onToggleBought={onToggleBought}
                     onAlert={onAlert}
                     onDelete={onDelete}
+                    onArchive={onArchive}
                   />
                 ))}
               </ul>
@@ -110,7 +115,7 @@ function GroupHeader({ group, collapsed, onToggle }: { group: ItemGroup; collaps
     >
       <Chevron className="h-4 w-4 shrink-0 text-cm-muted" aria-hidden />
       <span className="min-w-0 truncate text-[13px] font-bold uppercase tracking-[1.5px] text-cm-ink">
-        {group.category || "Sem categoria"}
+        {group.title}
       </span>
       <span className="text-[13px] font-bold tabular-nums text-cm-muted">· {group.items.length}</span>
       <span className="ml-auto shrink-0 pl-3 text-[12px] font-light tabular-nums text-cm-muted">
@@ -127,13 +132,26 @@ interface ItemRowProps {
   onToggleBought: (view: ItemView, bought: boolean) => void;
   onAlert: (view: ItemView) => void;
   onDelete: (view: ItemView) => void;
+  onArchive: (view: ItemView, archived: boolean) => void;
 }
 
-const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAlert, onDelete }: ItemRowProps) {
+/** Small tag only for the extremes: AGORA (accent) and UM DIA (muted). "Em breve" is the default and stays untagged. */
+function PriorityTag({ priority }: { priority: number }) {
+  const p = priorityOf(priority);
+  if (p === 1) return null;
+  return (
+    <CmTag variant={p === 2 ? "success" : "default"} className={cn("mr-1.5 shrink-0", p === 0 && "text-cm-muted")} title={`Prioridade: ${PRIORITY_LABEL[p].toLowerCase()}`}>
+      {PRIORITY_LABEL[p]}
+    </CmTag>
+  );
+}
+
+const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAlert, onDelete, onArchive }: ItemRowProps) {
   const { item, best, purchase } = view;
   const alert = alertStatus(view);
   const bought = item.bought;
-  const reached = alert.on && alert.reached && !bought;
+  const archived = item.archived;
+  const reached = alert.on && alert.reached && !bought && !archived;
 
   const specs = Object.values(item.specs)
     .map((s) => s.trim())
@@ -150,7 +168,9 @@ const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAl
         ? "sem preço nas lojas ainda"
         : "nenhuma loja ainda";
 
-  const verdictChip = bought ? (
+  const verdictChip = archived ? (
+    <CmTag>Arquivado</CmTag>
+  ) : bought ? (
     <CmTag variant="success">Comprado</CmTag>
   ) : (
     <VerdictChip verdict={view.verdict} className="max-w-full whitespace-normal text-center leading-[14px]" />
@@ -160,7 +180,7 @@ const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAl
     <li
       className={cn(
         "relative grid min-h-20 items-center gap-x-2.5 border-b border-cm-hairline px-2 py-3 hover:bg-cm-soft",
-        bought && "opacity-60"
+        (bought || archived) && "opacity-60"
       )}
       style={{ gridTemplateColumns: TEMPLATE[mode] }}
     >
@@ -180,7 +200,8 @@ const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAl
           >
             {item.name}
           </span>
-          <span className="mt-1 flex min-w-0 text-[13px] font-light leading-[18px] text-cm-body">
+          <span className="mt-1 flex min-w-0 items-center text-[13px] font-light leading-[18px] text-cm-body">
+            {!bought && !archived && <PriorityTag priority={item.priority} />}
             {specs && <span className="min-w-0 truncate">{specs}</span>}
             {specs && where && (
               <span className="shrink-0 px-1" aria-hidden>
@@ -200,17 +221,17 @@ const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAl
 
       {mode !== "narrow" && <div className="flex justify-center">{verdictChip}</div>}
 
-      <AlertCell view={view} onAlert={onAlert} />
+      {archived ? <span /> : <AlertCell view={view} onAlert={onAlert} />}
 
       {mode === "wide" && <div className="flex justify-center">{!bought && <Sparkline points={view.sparkline} trend={view.stats.trend} />}</div>}
 
       <CmIconButton
         size="sm"
         className="relative z-10"
-        active={alert.on && !bought}
-        disabled={bought}
+        active={alert.on && !bought && !archived}
+        disabled={bought || archived}
         aria-label={alert.on ? `Editar aviso de ${item.name}` : `Avisar quando ${item.name} baixar`}
-        title={bought ? "Item já comprado" : alert.on ? "Aviso ligado" : "Avisar quando baixar"}
+        title={archived ? "Item arquivado: sem avisos" : bought ? "Item já comprado" : alert.on ? "Aviso ligado" : "Avisar quando baixar"}
         onClick={() => onAlert(view)}
       >
         <Bell className="h-4 w-4" />
@@ -227,6 +248,7 @@ const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAl
           <CmMenuItem disabled={!best?.url} onSelect={() => best?.url && void openUrl(best.url).catch(() => {})}>
             Abrir na loja
           </CmMenuItem>
+          <CmMenuItem onSelect={() => onArchive(view, !archived)}>{archived ? "Desarquivar" : "Arquivar"}</CmMenuItem>
           <CmMenuSeparator />
           <CmMenuItem danger onSelect={() => onDelete(view)}>
             Excluir
