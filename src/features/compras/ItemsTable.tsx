@@ -179,12 +179,11 @@ const ItemRow = memo(function ItemRow({ view, mode, onOpen, onToggleBought, onAl
   return (
     <li
       className={cn(
-        "relative grid min-h-20 items-center gap-x-2.5 border-b border-cm-hairline px-2 py-3 hover:bg-cm-soft",
-        (bought || archived) && "opacity-60"
+        "relative grid min-h-20 items-center gap-x-2.5 border-b border-cm-hairline px-2 py-3 hover:bg-cm-soft"
       )}
       style={{ gridTemplateColumns: TEMPLATE[mode] }}
     >
-      <ItemThumb view={view} size={56} className="rounded-none border-0 bg-cm-card" />
+      <ItemThumb view={view} size={56} className={cn("rounded-none border-0 bg-cm-card", (bought || archived) && "opacity-50")} />
 
       <div className="min-w-0">
         {/* Stretched button: its ::after covers the row so a click anywhere opens the detail;

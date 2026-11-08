@@ -1,16 +1,12 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertTriangle, Link2, Loader2, PenLine, Search } from "lucide-react";
+import { AlertTriangle, Link2, Loader2, Search } from "lucide-react";
 import { comprasPreviewUrl } from "@/api";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import type { Extracted } from "@/types";
-import { BrlInput } from "./BrlInput";
 import { errorMessage } from "./format";
+import { CmTag } from "./ItemBadges";
 import { formatBRL } from "./money";
-import { Field } from "./shared";
+import { CmBrlInput, CmButton, CmCheckbox, CmField, CmInput } from "./ui";
 
 export type OfferDraft =
   | { kind: "url"; extracted: Extracted }
@@ -23,6 +19,8 @@ export type OfferDraft =
       inStock: boolean;
     };
 
+export type ManualDraft = Extract<OfferDraft, { kind: "manual" }>;
+
 /** Whether the draft has enough data to be submitted. */
 export function draftIsValid(d: OfferDraft | null): boolean {
   if (!d) return false;
@@ -30,17 +28,7 @@ export function draftIsValid(d: OfferDraft | null): boolean {
   return d.store.trim() !== "" && (d.listCents != null || d.cashCents != null);
 }
 
-interface OfferSourceFormProps {
-  draft: OfferDraft | null;
-  onChange: (d: OfferDraft | null) => void;
-  className?: string;
-  /** A link to preview as soon as the form shows up (quick add on the Hoje panel). */
-  initialUrl?: string;
-}
-
-type Mode = "url" | "manual";
-
-const EMPTY_MANUAL: Extract<OfferDraft, { kind: "manual" }> = {
+export const EMPTY_MANUAL: ManualDraft = {
   kind: "manual",
   store: "",
   url: "",
@@ -49,14 +37,23 @@ const EMPTY_MANUAL: Extract<OfferDraft, { kind: "manual" }> = {
   inStock: true,
 };
 
-/** URL (with preview) or manual offer entry. Shared by "add item" and "add offer". */
+interface OfferSourceFormProps {
+  draft: OfferDraft | null;
+  onChange: (d: OfferDraft | null) => void;
+  className?: string;
+  /** A link to preview as soon as the form shows up. */
+  initialUrl?: string;
+}
+
+type Mode = "url" | "manual";
+
+/** URL (with preview) or manual offer entry. Used by "add store" on an existing item. */
 export function OfferSourceForm({ draft, onChange, className, initialUrl }: OfferSourceFormProps) {
   const [mode, setMode] = useState<Mode>(draft?.kind ?? "url");
   const [url, setUrl] = useState(draft?.kind === "url" ? draft.extracted.url : (initialUrl ?? ""));
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const manual = draft?.kind === "manual" ? draft : EMPTY_MANUAL;
   const extracted = draft?.kind === "url" ? draft.extracted : null;
 
   const switchMode = (m: Mode) => {
@@ -96,132 +93,135 @@ export function OfferSourceForm({ draft, onChange, className, initialUrl }: Offe
   };
 
   return (
-    <div className={cn("flex flex-col gap-3", className)}>
-      <div className="inline-flex w-fit rounded-md border border-border bg-bg-100 p-0.5">
-        <ModeButton active={mode === "url"} onClick={() => switchMode("url")} icon={<Link2 className="h-3.5 w-3.5" />}>
-          Colar link da loja
-        </ModeButton>
-        <ModeButton active={mode === "manual"} onClick={() => switchMode("manual")} icon={<PenLine className="h-3.5 w-3.5" />}>
+    <div className={cn("flex flex-col gap-4", className)}>
+      <div role="tablist" aria-label="Como adicionar a loja" className="flex gap-6 border-b border-cm-hairline">
+        <ModeTab active={mode === "url"} onClick={() => switchMode("url")}>
+          <Link2 className="h-4 w-4" aria-hidden /> Colar link da loja
+        </ModeTab>
+        <ModeTab active={mode === "manual"} onClick={() => switchMode("manual")}>
           Preço manual
-        </ModeButton>
+        </ModeTab>
       </div>
 
       {mode === "url" ? (
         <>
-          <div className="flex gap-2">
-            <Input
+          <div className="flex gap-3">
+            <CmInput
               value={url}
+              aria-label="Link da loja"
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://www.kabum.com.br/produto/…"
               onKeyDown={(e) => e.key === "Enter" && fetchPreview()}
             />
-            <Button variant="secondary" onClick={fetchPreview} disabled={loading || !url.trim()}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}
+            <CmButton onClick={fetchPreview} disabled={loading || !url.trim()} className="h-12">
+              {loading ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden /> : <Search className="h-4 w-4" aria-hidden />}
               Buscar
-            </Button>
+            </CmButton>
           </div>
-          {error && <p className="rounded-md border border-danger/40 bg-danger-subtle p-2.5 text-[13px] text-danger">{error}</p>}
+          {error && (
+            <p role="alert" className="border border-cm-danger p-3 text-[13px] font-light text-cm-danger">
+              {error}
+            </p>
+          )}
           {extracted && <UrlPreviewCard extracted={extracted} onUseManual={useManualFromBlocked} />}
         </>
       ) : (
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Loja">
-            <Input
-              value={manual.store}
-              onChange={(e) => onChange({ ...manual, store: e.target.value })}
-              placeholder="Ex.: Mercado Livre"
-            />
-          </Field>
-          <Field label="Link (opcional)">
-            <Input
-              value={manual.url}
-              onChange={(e) => onChange({ ...manual, url: e.target.value })}
-              placeholder="https://…"
-            />
-          </Field>
-          <Field label="Preço cheio">
-            <BrlInput value={manual.listCents} onChange={(c) => onChange({ ...manual, listCents: c })} />
-          </Field>
-          <Field label="Preço Pix / à vista">
-            <BrlInput value={manual.cashCents} onChange={(c) => onChange({ ...manual, cashCents: c })} />
-          </Field>
-          <label className="col-span-2 flex items-center gap-2 text-[13px] text-ink-muted">
-            <Switch checked={manual.inStock} onCheckedChange={(v) => onChange({ ...manual, inStock: v })} />
-            Em estoque
-          </label>
-        </div>
+        <ManualOfferFields value={draft?.kind === "manual" ? draft : EMPTY_MANUAL} onChange={onChange} />
       )}
     </div>
   );
 }
 
-function ModeButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  icon: React.ReactNode;
-  children: React.ReactNode;
-}) {
+function ModeTab({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onClick={onClick}
       className={cn(
-        "inline-flex items-center gap-1.5 rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
-        active ? "bg-compras-subtle text-compras" : "text-ink-muted hover:text-ink"
+        "-mb-px inline-flex h-12 items-center gap-2 border-b-2 text-[12px] font-bold uppercase tracking-[1.5px] transition-colors",
+        "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cm-ink",
+        active ? "border-cm-accent text-cm-ink" : "border-transparent text-cm-muted hover:text-cm-ink"
       )}
     >
-      {icon}
       {children}
     </button>
   );
 }
 
-function UrlPreviewCard({ extracted, onUseManual }: { extracted: Extracted; onUseManual: () => void }) {
+/** Store, link, prices and stock typed by hand (for stores that do not allow automatic reading). */
+export function ManualOfferFields({ value, onChange }: { value: ManualDraft; onChange: (d: ManualDraft) => void }) {
   return (
-    <div className="flex gap-3 rounded-lg border border-border bg-bg-100 p-3">
-      <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-border bg-bg-200">
+    <div className="grid grid-cols-2 gap-4">
+      <CmField label="Loja" htmlFor="manual-store">
+        <CmInput
+          id="manual-store"
+          value={value.store}
+          onChange={(e) => onChange({ ...value, store: e.target.value })}
+          placeholder="Ex.: Mercado Livre"
+        />
+      </CmField>
+      <CmField label="Link (opcional)" htmlFor="manual-url">
+        <CmInput id="manual-url" value={value.url} onChange={(e) => onChange({ ...value, url: e.target.value })} placeholder="https://…" />
+      </CmField>
+      <CmField label="Preço cheio" htmlFor="manual-list">
+        <CmBrlInput id="manual-list" value={value.listCents} onChange={(c) => onChange({ ...value, listCents: c })} />
+      </CmField>
+      <CmField label="Preço Pix / à vista" htmlFor="manual-cash">
+        <CmBrlInput id="manual-cash" value={value.cashCents} onChange={(c) => onChange({ ...value, cashCents: c })} />
+      </CmField>
+      <CmCheckbox className="col-span-2" checked={value.inStock} onChange={(v) => onChange({ ...value, inStock: v })}>
+        Em estoque
+      </CmCheckbox>
+    </div>
+  );
+}
+
+/** What the store page told us: image, title, store, prices and any warning. Sharp tile, hairline border. */
+export function UrlPreviewCard({ extracted, onUseManual }: { extracted: Extracted; onUseManual: () => void }) {
+  const price = extracted.cashCents ?? extracted.listCents;
+  return (
+    <div className="flex gap-4 border border-cm-hairline bg-cm-soft">
+      <div className="flex h-28 w-28 shrink-0 items-center justify-center overflow-hidden bg-cm-card">
         {extracted.imageUrl ? (
           <img src={extracted.imageUrl} alt="" referrerPolicy="no-referrer" className="h-full w-full object-contain" />
         ) : (
-          <Link2 className="h-5 w-5 text-ink-faint" />
+          <Link2 aria-hidden className="h-6 w-6 text-cm-muted" />
         )}
       </div>
-      <div className="flex min-w-0 flex-1 flex-col gap-1.5">
-        <div className="flex items-center gap-2">
-          <Badge variant="default">{extracted.store}</Badge>
-          {extracted.inStock === false && <Badge variant="danger">Sem estoque</Badge>}
+      <div className="flex min-w-0 flex-1 flex-col gap-2 py-3 pr-4">
+        <div className="flex flex-wrap items-center gap-2">
+          <CmTag>{extracted.store}</CmTag>
+          {extracted.inStock === false && <CmTag variant="danger">Sem estoque</CmTag>}
         </div>
-        <p className="line-clamp-2 text-[13px] font-medium text-ink">{extracted.title ?? "Título não encontrado"}</p>
+        <p className="line-clamp-2 text-[14px] font-bold leading-5 text-cm-ink">{extracted.title ?? "Título não encontrado"}</p>
         {extracted.blocked ? (
-          <div className="flex flex-col gap-2 rounded-md border border-danger/40 bg-danger-subtle p-2.5 text-[12.5px] text-danger">
-            <span className="flex items-start gap-1.5">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-              Esta loja bloqueia a leitura automática (captcha/WAF). O app não tenta contornar isso. Você pode
-              cadastrar a oferta manualmente, com o link para abrir a loja.
+          <div className="flex flex-col gap-3 border border-cm-danger p-3 text-[13px] font-light text-cm-danger">
+            <span className="flex items-start gap-2">
+              <AlertTriangle aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+              Esta loja não deixa o app ler o preço sozinho (captcha ou proteção). O app não tenta driblar isso: digite o
+              preço e guarde o link para abrir a loja.
             </span>
-            <Button size="sm" variant="secondary" className="w-fit" onClick={onUseManual}>
-              Cadastrar como oferta manual
-            </Button>
+            <CmButton size="sm" className="w-fit" onClick={onUseManual}>
+              Digitar preço
+            </CmButton>
           </div>
         ) : (
-          <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-[13px]">
-            <span className="text-ink-muted">
-              Preço: <strong className="tabular-nums text-ink">{formatBRL(extracted.listCents)}</strong>
-            </span>
-            <span className="text-ink-muted">
-              Pix: <strong className="tabular-nums text-success">{formatBRL(extracted.cashCents)}</strong>
-            </span>
-            {extracted.installmentsText && <span className="text-ink-faint">{extracted.installmentsText}</span>}
+          <div className="flex flex-wrap items-baseline gap-x-5 gap-y-1">
+            <span className="text-[22px] font-bold tabular-nums text-cm-ink">{formatBRL(price)}</span>
+            {extracted.cashCents != null && extracted.listCents != null && extracted.listCents !== extracted.cashCents && (
+              <span className="text-[13px] font-light text-cm-body">
+                no Pix · preço cheio <span className="tabular-nums">{formatBRL(extracted.listCents)}</span>
+              </span>
+            )}
+            {extracted.installmentsText && <span className="text-[13px] font-light text-cm-muted">{extracted.installmentsText}</span>}
+            {price == null && <span className="text-[13px] font-light text-cm-warn">Não achamos o preço nesta página.</span>}
           </div>
         )}
         {extracted.warnings.map((w, i) => (
-          <p key={i} className="flex items-start gap-1.5 text-[12px] text-warning">
-            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+          <p key={i} className="flex items-start gap-2 text-[13px] font-light text-cm-warn">
+            <AlertTriangle aria-hidden className="mt-0.5 h-3.5 w-3.5 shrink-0" />
             {w}
           </p>
         ))}

@@ -70,6 +70,7 @@ export function ComprasRoot({
         templates={data.templates}
         rooms={rooms}
         defaultCategory={addCategory}
+        defaultTargetPct={data.settings?.defaultTargetPct}
         prefill={addPrefill}
         onClose={() => setAddOpen(false)}
         onCreated={(id) => {

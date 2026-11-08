@@ -223,7 +223,7 @@ function OfferRow({ offer, isBest, narrow, onChanged }: { offer: OfferView; isBe
   );
 
   return (
-    <li className={cn("border-b border-cm-hairline px-2 py-4", isBest && "bg-cm-soft", offer.status === "paused" && "opacity-60")}>
+    <li className={cn("border-b border-cm-hairline px-2 py-4", isBest && "bg-cm-soft")}>
       {narrow ? (
         <div className="flex flex-col gap-3">
           <div className="grid items-start gap-x-3" style={{ gridTemplateColumns: "minmax(0,1fr) auto 32px" }}>

@@ -426,9 +426,10 @@ pub fn upsert_item(conn: &Connection, mut item: ComprasItem, now: &str) -> Resul
         item.image_path = None;
         if item.template_id.is_none() {
             item.template_id = templates::template_for_name(&item.name).map(|s| s.to_string());
-            for (k, v) in templates::initial_specs(item.template_id.as_deref(), &item.name) {
-                item.specs.entry(k).or_insert(v);
-            }
+        }
+        // vale também para o modelo escolhido na tela: o que o usuário preencheu não é sobrescrito
+        for (k, v) in templates::initial_specs(item.template_id.as_deref(), &item.name) {
+            item.specs.entry(k).or_insert(v);
         }
         let tx = conn.unchecked_transaction().map_err(dberr)?;
         insert_item_row(&tx, &item)?;
@@ -1716,7 +1717,49 @@ mod tests {
         assert_eq!(count(&c, "alert_rules"), 0);
         let fk: i64 = c.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
         assert_eq!(fk, 1);
-        assert_eq!(list_templates(&c).unwrap().len(), 6);
+        assert_eq!(list_templates(&c).unwrap().len(), templates::seed_templates().len());
+    }
+
+    #[test]
+    fn seed_adds_missing_templates_without_touching_edited_ones() {
+        let c = mem();
+        migrate(&c).unwrap();
+        let total = templates::seed_templates().len();
+        assert!(total >= 21, "esperava os modelos de PC e de casa no seed");
+        // o usuário editou o modelo da placa de vídeo e apagou o de SSD (banco antigo, sem os modelos novos)
+        let mut gpu = list_templates(&c).unwrap().into_iter().find(|t| t.id == "placa-de-video").unwrap();
+        gpu.name = "Minha GPU".into();
+        gpu.fields.truncate(2);
+        upsert_template(&c, gpu.clone()).unwrap();
+        c.execute("DELETE FROM templates WHERE id IN ('ssd','fonte','monitor','air-fryer')", []).unwrap();
+        assert_eq!(list_templates(&c).unwrap().len(), total - 4);
+        migrate(&c).unwrap();
+        migrate(&c).unwrap();
+        let after = list_templates(&c).unwrap();
+        assert_eq!(after.len(), total, "o seed devolve só os que faltam, sem duplicar");
+        for id in ["ssd", "fonte", "monitor", "air-fryer"] {
+            assert!(after.iter().any(|t| t.id == id), "faltou {id}");
+        }
+        let edited = after.iter().find(|t| t.id == "placa-de-video").unwrap();
+        assert_eq!(edited.name, "Minha GPU");
+        assert_eq!(edited.fields.len(), 2, "modelo editado pelo usuário não é sobrescrito");
+    }
+
+    #[test]
+    fn new_items_pick_pc_template_and_initial_specs() {
+        let c = mem();
+        let it = new_item(&c, "Placa de vídeo RTX 4060 8GB", 1, Some(200000));
+        assert_eq!(it.template_id.as_deref(), Some("placa-de-video"));
+        let ram = new_item(&c, "Kingston Fury 16GB DDR5", 1, None);
+        assert_eq!(ram.template_id.as_deref(), Some("memoria-ram"));
+        assert_eq!(ram.specs.get("tipo").map(String::as_str), Some("DDR5"));
+        // modelo escolhido na tela + nome com BTUs: as specs iniciais entram, sem sobrescrever o que veio preenchido
+        let base = new_item(&c, "Rascunho", 1, None);
+        let mut draft = ComprasItem { id: String::new(), name: "Split 12000 btus".into(), template_id: Some("ar-condicionado".into()), ..base };
+        draft.specs.insert("marca".into(), "LG".into());
+        let ac = upsert_item(&c, draft, NOW).unwrap();
+        assert_eq!(ac.specs.get("btus").map(String::as_str), Some("12000"));
+        assert_eq!(ac.specs.get("marca").map(String::as_str), Some("LG"));
     }
 
     #[test]
@@ -2117,7 +2160,7 @@ mod tests {
         let c = mem();
         let t = upsert_template(&c, CategoryTemplate { id: String::new(), name: "Micro-ondas".into(), fields: vec![SpecField { key: "litros".into(), label: "Litros".into(), kind: "number".into(), options: None, unit: Some("L".into()) }] }).unwrap();
         assert!(!t.id.is_empty());
-        assert_eq!(list_templates(&c).unwrap().len(), 7);
+        assert_eq!(list_templates(&c).unwrap().len(), templates::seed_templates().len() + 1);
         assert!(upsert_template(&c, CategoryTemplate { id: String::new(), name: "".into(), fields: vec![] }).is_err());
         let dup = SpecField { key: "a".into(), label: "A".into(), kind: "text".into(), options: None, unit: None };
         assert!(upsert_template(&c, CategoryTemplate { id: String::new(), name: "X".into(), fields: vec![dup.clone(), dup] }).is_err());
@@ -2147,6 +2190,19 @@ mod tests {
         let dup = vec![rows[2].clone(), rows[2].clone()];
         let r = import_items(&c, &dup, NOW, ImportReport::default()).unwrap();
         assert_eq!((r.inserted, r.updated), (1, 1));
+    }
+
+    #[test]
+    fn import_assigns_pc_templates_by_keyword() {
+        let c = mem();
+        let row = |name: &str| SheetItem { bought: false, category: "Upgrade PC".into(), name: name.into(), qty: 1, budget_unit_cents: None, notes: String::new() };
+        let rows = vec![row("RTX 4060 Ti 16GB"), row("Ryzen 7 5700X"), row("Kit 32GB DDR4 3600"), row("Mesa de escritório")];
+        import_items(&c, &rows, NOW, ImportReport::default()).unwrap();
+        let got: Vec<Option<String>> = views(&c).into_iter().map(|v| v.item.template_id).collect();
+        assert_eq!(got[0].as_deref(), Some("placa-de-video"));
+        assert_eq!(got[1].as_deref(), Some("processador"));
+        assert_eq!(got[2].as_deref(), Some("memoria-ram"));
+        assert_eq!(got[3], None);
     }
 
     #[test]

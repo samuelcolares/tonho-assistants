@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import type { CategoryTemplate, SpecField } from "@/types";
 import { specKeysOf } from "./templates";
 import { CmButton, CmCheckbox, CmField, CmIconButton, CmInput, CmSelect } from "./ui";
@@ -56,17 +57,12 @@ export function SpecsForm({ template, specs, onChange, onCommitNow }: SpecsFormP
   return (
     <div className="flex flex-col gap-6">
       {template && template.fields.length > 0 && (
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {template.fields.map((f) => (
-            <SpecInput
-              key={f.key}
-              field={f}
-              value={specs[f.key] ?? ""}
-              onChange={(v) => setTemplateValue(f.key, v)}
-              onCommit={(v) => setTemplateValue(f.key, v, true)}
-            />
-          ))}
-        </div>
+        <TemplateFields
+          template={template}
+          specs={specs}
+          className="sm:grid-cols-2 lg:grid-cols-3"
+          onChange={setTemplateValue}
+        />
       )}
 
       <div className="flex flex-col gap-3">
@@ -108,19 +104,52 @@ export function SpecsForm({ template, specs, onChange, onCommitNow }: SpecsFormP
   );
 }
 
+/** Just the fields of the template (no free rows). Used by the add dialog and, through SpecsForm, by the detail. */
+export function TemplateFields({
+  template,
+  specs,
+  onChange,
+  className,
+  idPrefix = "spec",
+}: {
+  template: CategoryTemplate;
+  specs: Record<string, string>;
+  /** `now` = a select or toggle (commit at once); text and number fields are debounced by the caller. */
+  onChange: (key: string, value: string, now?: boolean) => void;
+  className?: string;
+  idPrefix?: string;
+}) {
+  return (
+    <div className={cn("grid grid-cols-1 gap-4", className)}>
+      {template.fields.map((f) => (
+        <SpecInput
+          key={f.key}
+          field={f}
+          idPrefix={idPrefix}
+          value={specs[f.key] ?? ""}
+          onChange={(v) => onChange(f.key, v)}
+          onCommit={(v) => onChange(f.key, v, true)}
+        />
+      ))}
+    </div>
+  );
+}
+
 function SpecInput({
   field,
   value,
   onChange,
   onCommit,
+  idPrefix,
 }: {
   field: SpecField;
   value: string;
   onChange: (v: string) => void;
   onCommit: (v: string) => void;
+  idPrefix: string;
 }) {
   const label = field.unit ? `${field.label} (${field.unit})` : field.label;
-  const id = `spec-${field.key}`;
+  const id = `${idPrefix}-${field.key}`;
   switch (field.kind) {
     case "bool":
       return (

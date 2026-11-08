@@ -45,7 +45,6 @@ export function AddOfferDialog({ open, itemId, itemName, onClose, onDone }: AddO
           <CmDialogTitle>Colar link</CmDialogTitle>
           <CmDialogDescription className="line-clamp-1">{itemName}</CmDialogDescription>
         </div>
-        {/* The source form is shared with "add item" and is restyled with that screen (P9). */}
         <OfferSourceForm draft={draft} onChange={setDraft} />
         <CmDialogFooter>
           <CmButton onClick={onClose} disabled={busy}>
