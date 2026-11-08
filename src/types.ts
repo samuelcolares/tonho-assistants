@@ -265,6 +265,7 @@ export interface ItemView {
   best: OfferView | null;
   stats: ItemStats;
   purchase: ComprasPurchase | null;
+  alert: AlertRule | null;
 }
 
 export interface CategoryBudget {
@@ -323,6 +324,49 @@ export interface ComprasSettings {
   amazonMinIntervalMinutes: number;
   cep: string | null;
   pixDiscountByStore: Record<string, number>;
+  notifyEnabled: boolean;
+  notifyNewLow: boolean;
+  cooldownHours: number;
+  realertDropPct: number;
+  quietStart: string | null; // "HH:MM"; null (with quietEnd) = off
+  quietEnd: string | null;
+  maxToastsPerCycle: number;
+  includeShipping: boolean;
+  usePix: boolean;
+  defaultTargetPct: number;
+  rooms: string[];
+}
+
+export type AlertKind = "target" | "new_low" | "restock";
+
+/** Per-item alert rule. `targetCents` mirrors `ComprasItem.targetCents`. Backend owns snooze and last_alert_*. */
+export interface AlertRule {
+  itemId: string;
+  enabled: boolean;
+  targetCents: number | null;
+  notifyNewLow: boolean;
+  snoozeUntil: string | null;
+  lastAlertCents: number | null;
+  lastAlertAt: string | null;
+  updatedAt: string;
+}
+
+export interface AlertEvent {
+  id: string;
+  itemId: string;
+  offerId: string | null;
+  kind: AlertKind;
+  priceCents: number;
+  prevCents: number | null;
+  reason: string;
+  createdAt: string;
+  /** Held by quiet hours; delivered later by the ticker. */
+  pending: boolean;
+  seen: boolean;
+  deliveredDesktop: boolean;
+  deliveredDiscord: boolean;
+  itemName: string;
+  title: string;
 }
 
 export interface PollStatus {

@@ -237,6 +237,7 @@ pub struct ItemView {
     pub best: Option<OfferView>,
     pub stats: ItemStats,
     pub purchase: Option<ComprasPurchase>,
+    pub alert: Option<AlertRule>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -301,14 +302,29 @@ pub struct ImportReport {
     pub errors: Vec<String>,
 }
 
+/// Persistido como JSON e recebido da UI. `default` no nível da struct: JSON antigo (v1) ou parcial
+/// carrega sem perder o que existe (ex.: `pixDiscountByStore`) e sem rejeitar campos novos ausentes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", default)]
 pub struct ComprasSettings {
     pub poll_enabled: bool,
     pub poll_interval_minutes: i64,
     pub amazon_min_interval_minutes: i64,
     pub cep: Option<String>,
     pub pix_discount_by_store: BTreeMap<String, f64>,
+    // ---- v2 (avisos)
+    pub notify_enabled: bool,
+    pub notify_new_low: bool,
+    pub cooldown_hours: i64,
+    pub realert_drop_pct: f64,
+    /// "HH:MM" ou null (sem horário silencioso). Precisa dos dois para valer.
+    pub quiet_start: Option<String>,
+    pub quiet_end: Option<String>,
+    pub max_toasts_per_cycle: i64,
+    pub include_shipping: bool,
+    pub use_pix: bool,
+    pub default_target_pct: f64,
+    pub rooms: Vec<String>,
 }
 
 impl Default for ComprasSettings {
@@ -319,8 +335,76 @@ impl Default for ComprasSettings {
             amazon_min_interval_minutes: 360,
             cep: None,
             pix_discount_by_store: BTreeMap::new(),
+            notify_enabled: true,
+            notify_new_low: true,
+            cooldown_hours: 24,
+            realert_drop_pct: 3.0,
+            quiet_start: Some("22:00".to_string()),
+            quiet_end: Some("08:00".to_string()),
+            max_toasts_per_cycle: 3,
+            include_shipping: true,
+            use_pix: true,
+            default_target_pct: 10.0,
+            rooms: Vec::new(),
         }
     }
+}
+
+str_enum!(AlertKind {
+    Target => "target",
+    NewLow => "new_low",
+    Restock => "restock",
+});
+
+/// Regra de aviso de um item. `target_cents` espelha `items.target_cents` (fonte da verdade do alvo).
+/// Recebida da UI: `snooze_until`, `last_alert_*` e `updated_at` são controlados pelo backend.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AlertRule {
+    pub item_id: String,
+    pub enabled: bool,
+    pub target_cents: Option<i64>,
+    pub notify_new_low: bool,
+    pub snooze_until: Option<String>,
+    pub last_alert_cents: Option<i64>,
+    pub last_alert_at: Option<String>,
+    pub updated_at: String,
+}
+
+impl Default for AlertRule {
+    fn default() -> Self {
+        AlertRule {
+            item_id: String::new(),
+            enabled: true,
+            target_cents: None,
+            notify_new_low: true,
+            snooze_until: None,
+            last_alert_cents: None,
+            last_alert_at: None,
+            updated_at: String::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AlertEvent {
+    pub id: String,
+    pub item_id: String,
+    pub offer_id: Option<String>,
+    pub kind: AlertKind,
+    pub price_cents: i64,
+    pub prev_cents: Option<i64>,
+    pub reason: String,
+    pub created_at: String,
+    /// Em horário silencioso: o ticker entrega depois.
+    pub pending: bool,
+    pub seen: bool,
+    pub delivered_desktop: bool,
+    pub delivered_discord: bool,
+    /// Conveniência para a UI (junção com `items`; não é coluna do evento).
+    pub item_name: String,
+    pub title: String,
 }
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]

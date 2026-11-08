@@ -6,6 +6,8 @@ import { check as checkForUpdate } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import type {
   ActivityEntry,
+  AlertEvent,
+  AlertRule,
   AppConfig,
   BudgetSummary,
   CategoryTemplate,
@@ -326,4 +328,42 @@ export function comprasMlSaveCredentials(clientId: string, clientSecret: string)
 
 export function comprasMlClearCredentials(): Promise<MlStatus> {
   return invoke("compras_ml_clear_credentials");
+}
+
+// --- Compras: avisos de preço ---
+
+export function comprasGetAlert(itemId: string): Promise<AlertRule | null> {
+  return invoke("compras_get_alert", { itemId });
+}
+
+/** Saves the rule (target, on/off, new-low) and keeps the item's target in sync. Snooze and last-alert state stay server-side. */
+export function comprasSetAlert(rule: AlertRule): Promise<AlertRule> {
+  return invoke("compras_set_alert", { rule });
+}
+
+/** Sets target = current best price minus `pctBelowCurrent`% for each item that has a price; returns how many were set. */
+export function comprasBulkSetTarget(itemIds: string[], pctBelowCurrent: number): Promise<number> {
+  return invoke("compras_bulk_set_target", { itemIds, pctBelowCurrent });
+}
+
+/** `until` RFC3339, or null to resume alerts. */
+export function comprasSnoozeAlert(itemId: string, until: string | null): Promise<AlertRule> {
+  return invoke("compras_snooze_alert", { itemId, until });
+}
+
+export function comprasListAlertEvents(limit = 100, unseenOnly = false): Promise<AlertEvent[]> {
+  return invoke("compras_list_alert_events", { limit, unseenOnly });
+}
+
+/** `ids` null = all. Returns how many were marked. */
+export function comprasMarkEventsSeen(ids: string[] | null): Promise<number> {
+  return invoke("compras_mark_events_seen", { ids });
+}
+
+export function comprasTestNotification(): Promise<void> {
+  return invoke("compras_test_notification");
+}
+
+export function onComprasAlert(cb: (event: AlertEvent) => void) {
+  return listen<AlertEvent>("compras://alert", (event) => cb(event.payload));
 }

@@ -1,6 +1,7 @@
 //! Módulo "Compras para Casa": rastreador de preços (SQLite + ticker próprio).
 //! Contrato de comandos/structs: docs/compras.spec.md seção 4.
 
+pub mod alerts;
 pub mod db;
 pub mod extract;
 pub mod http;
@@ -26,6 +27,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 pub const EVENT_UPDATED: &str = "compras://updated";
 pub const EVENT_POLL_STATUS: &str = "compras://poll-status";
+pub const EVENT_ALERT: &str = "compras://alert";
 
 pub struct ComprasState {
     pub db: Mutex<Connection>,
@@ -126,6 +128,90 @@ fn view_of(conn: &Connection, st: &ComprasState, id: &str) -> Result<ItemView, S
         .ok_or_else(|| "Item não encontrado.".to_string())
 }
 
+// ---------------------------------------------------------------- avisos (plumbing)
+
+/// Avalia o item e devolve os eventos novos (já gravados). Falha vira log: nunca derruba quem chamou.
+fn run_eval(
+    conn: &Connection,
+    settings: &ComprasSettings,
+    item_id: &str,
+    trigger: alerts::Trigger,
+    before: Option<&alerts::Snapshot>,
+) -> Vec<alerts::NewAlert> {
+    let ctx = alerts::EvalCtx { now: Utc::now(), tz: local_tz(), settings };
+    match alerts::evaluate(conn, item_id, trigger, before, &ctx) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("[compras] falha ao avaliar avisos de {item_id}: {e}");
+            Vec::new()
+        }
+    }
+}
+
+fn snapshot_for(conn: &Connection, settings: &ComprasSettings, item_id: Option<&str>) -> Option<alerts::Snapshot> {
+    let ctx = alerts::EvalCtx { now: Utc::now(), tz: local_tz(), settings };
+    alerts::snapshot(conn, item_id?, &ctx)
+}
+
+/// Entrega os avisos novos: notifica (limite por ciclo, sem segurar o banco), grava o que foi entregue
+/// e emite `compras://alert`. O evento já está no banco antes de qualquer notificação.
+fn dispatch(app: &AppHandle, new_alerts: Vec<alerts::NewAlert>) {
+    if new_alerts.is_empty() {
+        return;
+    }
+    let Ok(st) = state(app) else { return };
+    let max = st.conn().map(|c| db::load_settings(&c).max_toasts_per_cycle).unwrap_or(3).max(1) as usize;
+    let to_toast: Vec<AlertEvent> = new_alerts.iter().filter(|a| a.toast).map(|a| a.event.clone()).collect();
+    let mut desktop_ok: Vec<String> = Vec::new();
+    if !to_toast.is_empty() {
+        let plan = alerts::plan_toasts(&to_toast, max);
+        let desktop = alerts::DesktopChannel { app: app.clone() };
+        let channels: [&dyn alerts::AlertChannel; 1] = [&desktop];
+        for d in alerts::deliver(&channels, &plan) {
+            if d.event_ids.is_empty() {
+                continue;
+            }
+            if let Ok(conn) = st.conn() {
+                if let Err(e) = db::mark_delivered(&conn, &d.event_ids, d.channel) {
+                    eprintln!("[compras] falha ao registrar entrega do aviso: {e}");
+                }
+            }
+            if d.channel == "desktop" {
+                desktop_ok.extend(d.event_ids);
+            }
+        }
+    }
+    for a in new_alerts {
+        let mut ev = a.event;
+        ev.delivered_desktop = desktop_ok.contains(&ev.id);
+        let _ = app.emit(EVENT_ALERT, ev);
+    }
+}
+
+/// Entrega o que o horário silencioso segurou, quando ele termina.
+fn flush_pending(app: &AppHandle) {
+    let Ok(st) = state(app) else { return };
+    let (events, notify) = {
+        let Ok(conn) = st.conn() else { return };
+        if !db::has_pending_events(&conn) {
+            return;
+        }
+        let s = db::load_settings(&conn);
+        let local = Utc::now().with_timezone(&local_tz()).time();
+        if alerts::in_quiet_hours(local, s.quiet_start.as_deref(), s.quiet_end.as_deref()) {
+            return;
+        }
+        match db::take_pending_events(&conn) {
+            Ok(e) => (e, s.notify_enabled),
+            Err(e) => {
+                eprintln!("[compras] falha ao ler avisos pendentes: {e}");
+                return;
+            }
+        }
+    };
+    dispatch(app, events.into_iter().map(|event| alerts::NewAlert { event, toast: notify }).collect());
+}
+
 // ---------------------------------------------------------------- comandos
 
 #[tauri::command(async)]
@@ -146,11 +232,20 @@ pub fn compras_get_item(app: AppHandle, id: String) -> Result<ItemView, String> 
 #[tauri::command(async)]
 pub fn compras_upsert_item(app: AppHandle, item: ComprasItem) -> Result<ComprasItem, String> {
     let st = state(&app)?;
-    let saved = {
+    let (saved, new_alerts) = {
         let conn = st.conn()?;
-        db::upsert_item(&conn, item, &now_s())?
+        let before_target = if item.id.trim().is_empty() { None } else { db::get_item(&conn, &item.id)?.and_then(|i| i.target_cents) };
+        let saved = db::upsert_item(&conn, item, &now_s())?;
+        let mut new_alerts = Vec::new();
+        // alvo novo/alterado: se o preço já está no alvo, registra o evento (sem toast)
+        if saved.target_cents.is_some() && saved.target_cents != before_target {
+            let settings = db::load_settings(&conn);
+            new_alerts = run_eval(&conn, &settings, &saved.id, alerts::Trigger::RuleChange, None);
+        }
+        (saved, new_alerts)
     };
     emit_updated(&app, Some(&saved.id));
+    dispatch(&app, new_alerts);
     Ok(saved)
 }
 
@@ -194,21 +289,25 @@ pub fn compras_unmark_bought(app: AppHandle, item_id: String) -> Result<ItemView
 #[tauri::command(async)]
 pub fn compras_upsert_offer(app: AppHandle, offer: ComprasOffer, seed: Option<Extracted>) -> Result<ComprasOffer, String> {
     let st = state(&app)?;
-    let saved = {
+    let (saved, new_alerts) = {
         let conn = st.conn()?;
         let is_new = offer.id.trim().is_empty();
         let saved = db::upsert_offer(&conn, offer, &now_s())?;
         match seed {
             // a prévia já trouxe o preço: grava como primeira consulta em vez de esperar o ticker
             Some(seed) if is_new => {
+                let settings = db::load_settings(&conn);
+                let before = snapshot_for(&conn, &settings, Some(&saved.item_id));
                 db::seed_offer(&conn, &saved.id, seed, Utc::now(), scheduler::rand01())?;
-                db::get_offer(&conn, &saved.id)?.unwrap_or(saved)
+                let new_alerts = run_eval(&conn, &settings, &saved.item_id, alerts::Trigger::Seed, before.as_ref());
+                (db::get_offer(&conn, &saved.id)?.unwrap_or(saved), new_alerts)
             }
-            _ => saved,
+            _ => (saved, Vec::new()),
         }
     };
     st.wake(false);
     emit_updated(&app, Some(&saved.item_id));
+    dispatch(&app, new_alerts);
     Ok(saved)
 }
 
@@ -234,13 +333,112 @@ pub fn compras_add_manual_price(
     in_stock: Option<bool>,
 ) -> Result<ComprasObservation, String> {
     let st = state(&app)?;
-    let (obs, item_id) = {
+    let (obs, item_id, new_alerts) = {
         let conn = st.conn()?;
+        let item_id = db::offer_item_id(&conn, &offer_id);
+        let settings = db::load_settings(&conn);
+        let before = snapshot_for(&conn, &settings, item_id.as_deref());
         let obs = db::add_manual_price(&conn, &offer_id, list_cents, cash_cents, in_stock, &now_s())?;
-        (obs, db::offer_item_id(&conn, &offer_id))
+        let new_alerts = match item_id.as_deref() {
+            Some(id) => run_eval(&conn, &settings, id, alerts::Trigger::ManualPrice, before.as_ref()),
+            None => Vec::new(),
+        };
+        (obs, item_id, new_alerts)
     };
     emit_updated(&app, item_id.as_deref());
+    dispatch(&app, new_alerts);
     Ok(obs)
+}
+
+// ---------------------------------------------------------------- comandos de avisos
+
+#[tauri::command(async)]
+pub fn compras_get_alert(app: AppHandle, item_id: String) -> Result<Option<AlertRule>, String> {
+    let st = state(&app)?;
+    let conn = st.conn()?;
+    db::get_rule(&conn, &item_id)
+}
+
+#[tauri::command(async)]
+pub fn compras_set_alert(app: AppHandle, rule: AlertRule) -> Result<AlertRule, String> {
+    let st = state(&app)?;
+    let (saved, new_alerts) = {
+        let conn = st.conn()?;
+        let item_id = rule.item_id.clone();
+        let (saved, needs_eval) = db::apply_rule_edit(&conn, rule, &now_s())?;
+        let mut new_alerts = Vec::new();
+        if needs_eval {
+            let settings = db::load_settings(&conn);
+            new_alerts = run_eval(&conn, &settings, &item_id, alerts::Trigger::RuleChange, None);
+        }
+        (db::get_rule(&conn, &item_id)?.unwrap_or(saved), new_alerts)
+    };
+    emit_updated(&app, Some(&saved.item_id));
+    dispatch(&app, new_alerts);
+    Ok(saved)
+}
+
+/// Avisar quando custar `pct_below_current`% menos que o preço atual. Pula itens comprados ou sem preço.
+#[tauri::command(async)]
+pub fn compras_bulk_set_target(app: AppHandle, item_ids: Vec<String>, pct_below_current: f64) -> Result<i64, String> {
+    if !pct_below_current.is_finite() || pct_below_current <= 0.0 || pct_below_current >= 100.0 {
+        return Err("Informe um percentual entre 0 e 100.".to_string());
+    }
+    let st = state(&app)?;
+    let n = {
+        let conn = st.conn()?;
+        let settings = db::load_settings(&conn);
+        let wanted: std::collections::HashSet<&str> = item_ids.iter().map(|s| s.as_str()).collect();
+        let views = db::load_views(&conn, None, &settings, today(), local_tz(), &st.dir)?;
+        let targets: Vec<(String, i64)> = views
+            .iter()
+            .filter(|v| wanted.contains(v.item.id.as_str()) && !v.item.bought)
+            .filter_map(|v| {
+                let cur = v.best.as_ref()?.final_cents?;
+                Some((v.item.id.clone(), ((cur as f64) * (1.0 - pct_below_current / 100.0)).round() as i64))
+            })
+            .collect();
+        db::bulk_set_targets(&conn, &targets, &now_s())?
+    };
+    emit_updated(&app, None);
+    Ok(n as i64)
+}
+
+#[tauri::command(async)]
+pub fn compras_snooze_alert(app: AppHandle, item_id: String, until: Option<String>) -> Result<AlertRule, String> {
+    let st = state(&app)?;
+    let rule = {
+        let conn = st.conn()?;
+        db::set_snooze(&conn, &item_id, until.as_deref(), &now_s())?
+    };
+    emit_updated(&app, Some(&item_id));
+    Ok(rule)
+}
+
+#[tauri::command(async)]
+pub fn compras_list_alert_events(app: AppHandle, limit: Option<i64>, unseen_only: Option<bool>) -> Result<Vec<AlertEvent>, String> {
+    let st = state(&app)?;
+    let conn = st.conn()?;
+    db::list_events(&conn, limit.unwrap_or(100), unseen_only.unwrap_or(false))
+}
+
+/// `ids` nulo = todos. Retorna quantos foram marcados.
+#[tauri::command(async)]
+pub fn compras_mark_events_seen(app: AppHandle, ids: Option<Vec<String>>) -> Result<i64, String> {
+    let st = state(&app)?;
+    let conn = st.conn()?;
+    Ok(db::mark_events_seen(&conn, ids.as_deref())? as i64)
+}
+
+#[tauri::command(async)]
+pub fn compras_test_notification(app: AppHandle) -> Result<(), String> {
+    use alerts::AlertChannel;
+    let toast = alerts::Toast {
+        title: "Aviso de teste".to_string(),
+        body: "Se você está vendo isto, os avisos de preço do Tonho estão funcionando.".to_string(),
+        event_ids: Vec::new(),
+    };
+    alerts::DesktopChannel { app }.send(&toast).map_err(|e| format!("Não foi possível mostrar a notificação: {e}"))
 }
 
 /// Prévia para loja que redirecionou para verificação/captcha.
@@ -554,19 +752,19 @@ fn fetch_and_classify(http: &Http, ml: &mercadolivre::MlAuth, url: &str) -> Poll
 }
 
 /// Consulta uma oferta. Rede e parsing rodam sem nenhum lock; o banco só é tocado no início e no fim.
-fn poll_one(app: &AppHandle, offer_id: &str) {
-    let Ok(st) = state(app) else { return };
+fn poll_one(app: &AppHandle, offer_id: &str) -> Vec<alerts::NewAlert> {
+    let Ok(st) = state(app) else { return Vec::new() };
     let ctx = {
-        let Ok(conn) = st.conn() else { return };
+        let Ok(conn) = st.conn() else { return Vec::new() };
         match db::poll_context(&conn, offer_id) {
             Ok(Some(c)) => c,
-            _ => return,
+            _ => return Vec::new(),
         }
     };
     if ctx.offer.status == OfferStatus::Paused || ctx.offer.adapter == OfferAdapter::Manual {
-        return;
+        return Vec::new();
     }
-    let Some(url) = ctx.offer.url.clone() else { return };
+    let Some(url) = ctx.offer.url.clone() else { return Vec::new() };
     let interval = scheduler::interval_minutes(&ctx.settings, ctx.offer.adapter);
     if let Some(host) = http::host_of(&url) {
         st.http.host_mark(&host, Instant::now());
@@ -575,13 +773,23 @@ fn poll_one(app: &AppHandle, offer_id: &str) {
         kind: FailKind::Transient,
         message: "Erro interno ao ler a página da loja.".to_string(),
     });
-    {
-        let Ok(conn) = st.conn() else { return };
-        if let Err(e) = db::apply_poll_outcome(&conn, offer_id, ctx.model_token.as_deref(), outcome, interval, Utc::now(), scheduler::rand01()) {
-            eprintln!("[compras] falha ao gravar resultado da consulta: {e}");
+    // só uma leitura bem-sucedida pode disparar aviso
+    let is_success = matches!(outcome, PollOutcome::Success(_));
+    let new_alerts = {
+        let Ok(conn) = st.conn() else { return Vec::new() };
+        let settings = db::load_settings(&conn);
+        let before = if is_success { snapshot_for(&conn, &settings, Some(&ctx.offer.item_id)) } else { None };
+        match db::apply_poll_outcome(&conn, offer_id, ctx.model_token.as_deref(), outcome, interval, Utc::now(), scheduler::rand01()) {
+            Err(e) => {
+                eprintln!("[compras] falha ao gravar resultado da consulta: {e}");
+                Vec::new()
+            }
+            Ok(_) if is_success => run_eval(&conn, &settings, &ctx.offer.item_id, alerts::Trigger::Poll, before.as_ref()),
+            Ok(_) => Vec::new(),
         }
-    }
+    };
     emit_updated(app, Some(&ctx.offer.item_id));
+    new_alerts
 }
 
 fn run_tick(app: &AppHandle, force: bool) {
@@ -610,6 +818,8 @@ fn run_tick(app: &AppHandle, force: bool) {
         return;
     }
     let mut pending = due;
+    // avisos do ciclo: notificados no fim (limite de toasts por ciclo), nunca com o banco travado
+    let mut cycle_alerts: Vec<alerts::NewAlert> = Vec::new();
     update_status(app, &st, |s| {
         s.running = true;
         s.queued = pending.len() as i64;
@@ -630,9 +840,9 @@ fn run_tick(app: &AppHandle, force: bool) {
         match pick {
             Some(idx) => {
                 let (id, _) = pending.remove(idx);
-                let r = catch_unwind(AssertUnwindSafe(|| poll_one(app, &id)));
-                if r.is_err() {
-                    eprintln!("[compras] pânico contido ao consultar a oferta {id}");
+                match catch_unwind(AssertUnwindSafe(|| poll_one(app, &id))) {
+                    Ok(a) => cycle_alerts.extend(a),
+                    Err(_) => eprintln!("[compras] pânico contido ao consultar a oferta {id}"),
                 }
             }
             None => std::thread::sleep(min_wait.unwrap_or(Duration::from_secs(1)).min(http::HOST_GAP)),
@@ -645,6 +855,7 @@ fn run_tick(app: &AppHandle, force: bool) {
         s.queued = 0;
         s.last_run_at = Some(now_s());
     });
+    dispatch(app, cycle_alerts);
 }
 
 /// Thread própria: acorda a cada 60 s (ou por `compras_refresh`) e consulta as ofertas vencidas.
@@ -656,6 +867,9 @@ pub fn spawn_ticker(app: AppHandle) {
             if catch_unwind(AssertUnwindSafe(|| run_tick(&app, force))).is_err() {
                 eprintln!("[compras] pânico contido no ciclo do agendador");
                 update_status_safe(&app);
+            }
+            if catch_unwind(AssertUnwindSafe(|| flush_pending(&app))).is_err() {
+                eprintln!("[compras] pânico contido ao entregar avisos pendentes");
             }
             let Some(st) = app.try_state::<ComprasState>() else {
                 std::thread::sleep(Duration::from_secs(60));

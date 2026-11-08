@@ -97,19 +97,120 @@ CREATE TABLE settings(
 );
 ";
 
+const SCHEMA_V2: &str = "
+CREATE TABLE alert_rules(
+  item_id TEXT PRIMARY KEY REFERENCES items(id) ON DELETE CASCADE,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  target_cents INTEGER,
+  notify_new_low INTEGER NOT NULL DEFAULT 1,
+  snooze_until TEXT,
+  last_alert_cents INTEGER,
+  last_alert_at TEXT,
+  updated_at TEXT NOT NULL
+);
+CREATE TABLE alert_events(
+  id TEXT PRIMARY KEY,
+  item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
+  offer_id TEXT,
+  kind TEXT NOT NULL,
+  price_cents INTEGER NOT NULL,
+  prev_cents INTEGER,
+  reason TEXT NOT NULL DEFAULT '',
+  created_at TEXT NOT NULL,
+  pending INTEGER NOT NULL DEFAULT 0,
+  seen INTEGER NOT NULL DEFAULT 0,
+  delivered_desktop INTEGER NOT NULL DEFAULT 0,
+  delivered_discord INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX alert_events_created ON alert_events(created_at);
+CREATE INDEX alert_events_item ON alert_events(item_id);
+INSERT INTO alert_rules(item_id, enabled, target_cents, notify_new_low, updated_at)
+  SELECT id, 1, target_cents, 1, updated_at FROM items WHERE target_cents IS NOT NULL;
+";
+
+/// Versão do esquema que este aplicativo entende.
+pub const SCHEMA_VERSION: i64 = 2;
+
+/// Caminho do arquivo do banco (None para banco em memória).
+fn db_file_path(conn: &Connection) -> Option<std::path::PathBuf> {
+    let file: String = conn
+        .query_row("SELECT file FROM pragma_database_list WHERE name='main'", [], |r| r.get(0))
+        .ok()?;
+    if file.trim().is_empty() {
+        None
+    } else {
+        Some(std::path::PathBuf::from(file))
+    }
+}
+
+/// Copia consistente do banco (`VACUUM INTO`) antes de migrar um arquivo: `<nome>.bak-v{antiga}-{yyyymmddHHMM}`.
+/// Falhar aqui aborta a migração (os dados ficam como estavam).
+fn backup_before_migration(conn: &Connection, old_version: i64) -> Result<Option<std::path::PathBuf>, String> {
+    let Some(file) = db_file_path(conn) else {
+        return Ok(None);
+    };
+    let name = file.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "compras.db".to_string());
+    let stamp = chrono::Local::now().format("%Y%m%d%H%M").to_string();
+    let dir = file.parent().map(|p| p.to_path_buf()).unwrap_or_default();
+    let mut target = dir.join(format!("{name}.bak-v{old_version}-{stamp}"));
+    let mut n = 2;
+    while target.exists() {
+        target = dir.join(format!("{name}.bak-v{old_version}-{stamp}-{n}"));
+        n += 1;
+    }
+    conn.execute("VACUUM INTO ?1", params![target.to_string_lossy()])
+        .map_err(|e| format!("Não foi possível fazer a cópia de segurança do banco antes de atualizar: {e}"))?;
+    Ok(Some(target))
+}
+
 pub fn migrate(conn: &Connection) -> Result<(), String> {
     conn.pragma_update(None, "foreign_keys", "ON").map_err(dberr)?;
     let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).map_err(dberr)?;
+    if version > SCHEMA_VERSION {
+        return Err("O banco de dados de Compras é de uma versão mais nova que este aplicativo.".to_string());
+    }
+    if version >= 1 && version < SCHEMA_VERSION {
+        backup_before_migration(conn, version)?;
+    }
     if version < 1 {
         let tx = conn.unchecked_transaction().map_err(dberr)?;
         tx.execute_batch(SCHEMA_V1).map_err(dberr)?;
         tx.pragma_update(None, "user_version", 1).map_err(dberr)?;
         tx.commit().map_err(dberr)?;
     }
-    if version > 1 {
-        return Err("O banco de dados de Compras é de uma versão mais nova que este aplicativo.".to_string());
+    if version < 2 {
+        let tx = conn.unchecked_transaction().map_err(dberr)?;
+        tx.execute_batch(SCHEMA_V2).map_err(dberr)?;
+        tx.pragma_update(None, "user_version", 2).map_err(dberr)?;
+        tx.commit().map_err(dberr)?;
+        if version == 1 {
+            // dados antigos: itens que já estão no alvo não devem disparar aviso de uma vez no primeiro poll
+            let _ = prime_alert_rules(conn);
+        }
     }
     seed_templates(conn)
+}
+
+/// Pós-migração v1->v2: para regras cujo preço atual já está no alvo, grava o estado "já avisado"
+/// (sem evento, sem toast). Melhor esforço.
+fn prime_alert_rules(conn: &Connection) -> Result<usize, String> {
+    let settings = load_settings(conn);
+    let tz = *chrono::Local::now().offset();
+    let today = chrono::Local::now().date_naive();
+    let now = ts(Utc::now());
+    let views = load_views(conn, None, &settings, today, tz, Path::new("."))?;
+    let mut n = 0;
+    for v in views {
+        let (Some(rule), Some(cand)) = (&v.alert, super::alerts::candidate_of(&v)) else { continue };
+        if v.item.bought {
+            continue;
+        }
+        if rule.target_cents.map(|t| cand.final_cents <= t).unwrap_or(false) {
+            set_alert_state(conn, &v.item.id, Some(cand.final_cents), Some(&now))?;
+            n += 1;
+        }
+    }
+    Ok(n)
 }
 
 fn seed_templates(conn: &Connection) -> Result<(), String> {
@@ -156,6 +257,25 @@ pub fn save_settings(conn: &Connection, mut s: ComprasSettings) -> Result<Compra
     s.amazon_min_interval_minutes = s.amazon_min_interval_minutes.clamp(360, 1440);
     s.cep = s.cep.map(|c| c.trim().to_string()).filter(|c| !c.is_empty());
     s.pix_discount_by_store.retain(|k, v| !k.trim().is_empty() && v.is_finite() && *v >= 0.0 && *v < 100.0);
+    s.cooldown_hours = s.cooldown_hours.clamp(1, 720);
+    s.realert_drop_pct = if s.realert_drop_pct.is_finite() { s.realert_drop_pct.clamp(0.0, 100.0) } else { 3.0 };
+    s.max_toasts_per_cycle = s.max_toasts_per_cycle.clamp(1, 20);
+    s.default_target_pct = if s.default_target_pct.is_finite() { s.default_target_pct.clamp(1.0, 90.0) } else { 10.0 };
+    // horário silencioso: os dois "HH:MM" válidos, senão desligado
+    let quiet = match (s.quiet_start.as_deref().and_then(super::alerts::normalize_hhmm), s.quiet_end.as_deref().and_then(super::alerts::normalize_hhmm)) {
+        (Some(a), Some(b)) => (Some(a), Some(b)),
+        _ => (None, None),
+    };
+    s.quiet_start = quiet.0;
+    s.quiet_end = quiet.1;
+    let mut rooms: Vec<String> = Vec::new();
+    for r in s.rooms.drain(..) {
+        let r = r.trim().to_string();
+        if !r.is_empty() && !rooms.iter().any(|x| x.eq_ignore_ascii_case(&r)) {
+            rooms.push(r);
+        }
+    }
+    s.rooms = rooms;
     let json = serde_json::to_string(&s).map_err(|e| e.to_string())?;
     conn.execute("INSERT INTO settings(key, value) VALUES('settings', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![json])
         .map_err(dberr)?;
@@ -291,13 +411,17 @@ pub fn upsert_item(conn: &Connection, mut item: ComprasItem, now: &str) -> Resul
                 item.specs.entry(k).or_insert(v);
             }
         }
-        insert_item_row(conn, &item)?;
+        let tx = conn.unchecked_transaction().map_err(dberr)?;
+        insert_item_row(&tx, &item)?;
+        sync_rule_target(&tx, &item.id, item.target_cents, now)?;
+        tx.commit().map_err(dberr)?;
         return Ok(item);
     }
     let existing = get_item(conn, &item.id)?.ok_or_else(|| "Item não encontrado.".to_string())?;
     let specs = serde_json::to_string(&item.specs).map_err(|e| e.to_string())?;
     // `bought` e `image_path` só mudam por comandos próprios.
-    conn.execute(
+    let tx = conn.unchecked_transaction().map_err(dberr)?;
+    tx.execute(
         "UPDATE items SET category=?2, name=?3, qty=?4, budget_unit_cents=?5, target_cents=?6, notes=?7, specs=?8, template_id=?9, model_token=?10, priority=?11, updated_at=?12 WHERE id=?1",
         params![
             item.id, item.category, item.name, item.qty, item.budget_unit_cents, item.target_cents, item.notes, specs,
@@ -305,6 +429,10 @@ pub fn upsert_item(conn: &Connection, mut item: ComprasItem, now: &str) -> Resul
         ],
     )
     .map_err(dberr)?;
+    if existing.target_cents != item.target_cents {
+        sync_rule_target(&tx, &item.id, item.target_cents, now)?;
+    }
+    tx.commit().map_err(dberr)?;
     item.bought = existing.bought;
     item.image_path = existing.image_path;
     item.created_at = existing.created_at;
@@ -330,6 +458,261 @@ pub fn set_item_image(conn: &Connection, item_id: &str, rel_path: &str, now: &st
         return Err("Item não encontrado.".to_string());
     }
     Ok(())
+}
+
+// ---------------------------------------------------------------- avisos (regras e eventos)
+
+const RULE_COLS: &str = "item_id, enabled, target_cents, notify_new_low, snooze_until, last_alert_cents, last_alert_at, updated_at";
+
+fn row_rule(r: &Row) -> rusqlite::Result<AlertRule> {
+    Ok(AlertRule {
+        item_id: r.get(0)?,
+        enabled: r.get::<_, i64>(1)? != 0,
+        target_cents: r.get(2)?,
+        notify_new_low: r.get::<_, i64>(3)? != 0,
+        snooze_until: r.get(4)?,
+        last_alert_cents: r.get(5)?,
+        last_alert_at: r.get(6)?,
+        updated_at: r.get(7)?,
+    })
+}
+
+pub fn get_rule(conn: &Connection, item_id: &str) -> Result<Option<AlertRule>, String> {
+    conn.query_row(&format!("SELECT {RULE_COLS} FROM alert_rules WHERE item_id=?1"), params![item_id], row_rule)
+        .optional()
+        .map_err(dberr)
+}
+
+fn write_rule(conn: &Connection, r: &AlertRule) -> Result<(), String> {
+    conn.execute(
+        &format!(
+            "INSERT INTO alert_rules({RULE_COLS}) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)
+             ON CONFLICT(item_id) DO UPDATE SET enabled=excluded.enabled, target_cents=excluded.target_cents,
+               notify_new_low=excluded.notify_new_low, snooze_until=excluded.snooze_until,
+               last_alert_cents=excluded.last_alert_cents, last_alert_at=excluded.last_alert_at, updated_at=excluded.updated_at"
+        ),
+        params![
+            r.item_id, r.enabled as i64, r.target_cents, r.notify_new_low as i64, r.snooze_until, r.last_alert_cents,
+            r.last_alert_at, r.updated_at
+        ],
+    )
+    .map_err(dberr)?;
+    Ok(())
+}
+
+/// Item editado com novo alvo (ou criado com alvo): espelha na regra. Mudar o alvo reativa o aviso e
+/// zera o "já avisado". Sem alvo, a regra continua (pode valer só "novo menor preço").
+fn sync_rule_target(conn: &Connection, item_id: &str, target: Option<i64>, now: &str) -> Result<(), String> {
+    match get_rule(conn, item_id)? {
+        None => {
+            if target.is_some() {
+                write_rule(conn, &AlertRule { item_id: item_id.to_string(), target_cents: target, updated_at: now.to_string(), ..Default::default() })?;
+            }
+        }
+        Some(mut r) => {
+            if r.target_cents != target {
+                r.target_cents = target;
+                r.last_alert_cents = None;
+                r.last_alert_at = None;
+                if target.is_some() {
+                    r.enabled = true;
+                }
+                r.updated_at = now.to_string();
+                write_rule(conn, &r)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+fn apply_rule_edit_core(conn: &Connection, incoming: AlertRule, now: &str) -> Result<(AlertRule, bool), String> {
+    if get_item(conn, &incoming.item_id)?.is_none() {
+        return Err("Item não encontrado.".to_string());
+    }
+    if incoming.target_cents.map(|c| c < 0).unwrap_or(false) {
+        return Err("O valor do aviso não pode ser negativo.".to_string());
+    }
+    let existing = get_rule(conn, &incoming.item_id)?;
+    let target_changed = match &existing {
+        Some(r) => r.target_cents != incoming.target_cents,
+        None => incoming.target_cents.is_some(),
+    };
+    let was_enabled = existing.as_ref().map(|r| r.enabled).unwrap_or(false);
+    let mut rule = existing.unwrap_or_default();
+    rule.item_id = incoming.item_id.clone();
+    rule.enabled = incoming.enabled;
+    rule.target_cents = incoming.target_cents;
+    rule.notify_new_low = incoming.notify_new_low;
+    rule.updated_at = now.to_string();
+    if target_changed {
+        rule.last_alert_cents = None;
+        rule.last_alert_at = None;
+    }
+    write_rule(conn, &rule)?;
+    // `items.target_cents` é a fonte da verdade do alvo: mantém igual à regra
+    conn.execute("UPDATE items SET target_cents=?2 WHERE id=?1", params![rule.item_id, rule.target_cents]).map_err(dberr)?;
+    let needs_eval = rule.enabled && rule.target_cents.is_some() && (target_changed || !was_enabled);
+    Ok((rule, needs_eval))
+}
+
+/// Cria/atualiza a regra vinda da UI (snooze e "já avisado" ficam com o backend). O booleano indica se vale
+/// avaliar o preço atual contra o novo alvo.
+pub fn apply_rule_edit(conn: &Connection, incoming: AlertRule, now: &str) -> Result<(AlertRule, bool), String> {
+    let tx = conn.unchecked_transaction().map_err(dberr)?;
+    let out = apply_rule_edit_core(&tx, incoming, now)?;
+    tx.commit().map_err(dberr)?;
+    Ok(out)
+}
+
+/// Define o alvo de vários itens numa transação (mantém `notify_new_low` e liga o aviso). Itens inexistentes são pulados.
+pub fn bulk_set_targets(conn: &Connection, targets: &[(String, i64)], now: &str) -> Result<usize, String> {
+    let tx = conn.unchecked_transaction().map_err(dberr)?;
+    let mut n = 0;
+    for (id, cents) in targets {
+        if get_item(&tx, id)?.is_none() {
+            continue;
+        }
+        let mut rule = get_rule(&tx, id)?.unwrap_or_else(|| AlertRule { item_id: id.clone(), ..Default::default() });
+        rule.enabled = true;
+        rule.target_cents = Some((*cents).max(0));
+        apply_rule_edit_core(&tx, rule, now)?;
+        n += 1;
+    }
+    tx.commit().map_err(dberr)?;
+    Ok(n)
+}
+
+pub fn set_alert_state(conn: &Connection, item_id: &str, cents: Option<i64>, at: Option<&str>) -> Result<(), String> {
+    conn.execute("UPDATE alert_rules SET last_alert_cents=?2, last_alert_at=?3 WHERE item_id=?1", params![item_id, cents, at]).map_err(dberr)?;
+    Ok(())
+}
+
+pub fn set_snooze(conn: &Connection, item_id: &str, until: Option<&str>, now: &str) -> Result<AlertRule, String> {
+    if let Some(u) = until {
+        if DateTime::parse_from_rfc3339(u).is_err() {
+            return Err("Data inválida para silenciar o aviso.".to_string());
+        }
+    }
+    let n = conn
+        .execute("UPDATE alert_rules SET snooze_until=?2, updated_at=?3 WHERE item_id=?1", params![item_id, until, now])
+        .map_err(dberr)?;
+    if n == 0 {
+        return Err("Este item não tem aviso configurado.".to_string());
+    }
+    get_rule(conn, item_id)?.ok_or_else(|| "Este item não tem aviso configurado.".to_string())
+}
+
+const EVENT_COLS: &str = "e.id, e.item_id, e.offer_id, e.kind, e.price_cents, e.prev_cents, e.reason, e.created_at, e.pending, e.seen, e.delivered_desktop, e.delivered_discord, i.name, i.bought";
+
+fn row_event(r: &Row) -> rusqlite::Result<(AlertEvent, bool)> {
+    let kind: String = r.get(3)?;
+    let kind = AlertKind::parse(&kind).unwrap_or(AlertKind::Target);
+    let name: String = r.get(12)?;
+    let ev = AlertEvent {
+        id: r.get(0)?,
+        item_id: r.get(1)?,
+        offer_id: r.get(2)?,
+        kind,
+        price_cents: r.get(4)?,
+        prev_cents: r.get(5)?,
+        reason: r.get(6)?,
+        created_at: r.get(7)?,
+        pending: r.get::<_, i64>(8)? != 0,
+        seen: r.get::<_, i64>(9)? != 0,
+        delivered_desktop: r.get::<_, i64>(10)? != 0,
+        delivered_discord: r.get::<_, i64>(11)? != 0,
+        title: super::alerts::title_for(kind, &name),
+        item_name: name,
+    };
+    Ok((ev, r.get::<_, i64>(13)? != 0))
+}
+
+pub fn insert_event(conn: &Connection, e: &AlertEvent) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO alert_events(id, item_id, offer_id, kind, price_cents, prev_cents, reason, created_at, pending, seen, delivered_desktop, delivered_discord)
+         VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![
+            e.id, e.item_id, e.offer_id, e.kind.as_str(), e.price_cents, e.prev_cents, e.reason, e.created_at, e.pending as i64,
+            e.seen as i64, e.delivered_desktop as i64, e.delivered_discord as i64
+        ],
+    )
+    .map_err(dberr)?;
+    Ok(())
+}
+
+/// Mais recentes primeiro. `limit` fica entre 1 e 500.
+pub fn list_events(conn: &Connection, limit: i64, unseen_only: bool) -> Result<Vec<AlertEvent>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {EVENT_COLS} FROM alert_events e JOIN items i ON i.id=e.item_id
+             WHERE (?1=0 OR e.seen=0) ORDER BY e.created_at DESC, e.rowid DESC LIMIT ?2"
+        ))
+        .map_err(dberr)?;
+    let rows = stmt.query_map(params![unseen_only as i64, limit.clamp(1, 500)], row_event).map_err(dberr)?;
+    let mut out = Vec::new();
+    for r in rows {
+        out.push(r.map_err(dberr)?.0);
+    }
+    Ok(out)
+}
+
+/// `None` = todos. Retorna quantos foram marcados.
+pub fn mark_events_seen(conn: &Connection, ids: Option<&[String]>) -> Result<usize, String> {
+    match ids {
+        None => conn.execute("UPDATE alert_events SET seen=1 WHERE seen=0", []).map_err(dberr),
+        Some(ids) => {
+            let tx = conn.unchecked_transaction().map_err(dberr)?;
+            let mut n = 0;
+            for id in ids {
+                n += tx.execute("UPDATE alert_events SET seen=1 WHERE id=?1 AND seen=0", params![id]).map_err(dberr)?;
+            }
+            tx.commit().map_err(dberr)?;
+            Ok(n)
+        }
+    }
+}
+
+/// `channel`: "desktop" | "discord".
+pub fn mark_delivered(conn: &Connection, ids: &[String], channel: &str) -> Result<(), String> {
+    let col = match channel {
+        "desktop" => "delivered_desktop",
+        "discord" => "delivered_discord",
+        _ => return Ok(()),
+    };
+    let tx = conn.unchecked_transaction().map_err(dberr)?;
+    for id in ids {
+        tx.execute(&format!("UPDATE alert_events SET {col}=1 WHERE id=?1"), params![id]).map_err(dberr)?;
+    }
+    tx.commit().map_err(dberr)
+}
+
+/// Eventos retidos pelo horário silencioso. Zera `pending` de todos (cada um sai uma única vez);
+/// itens já comprados nesse meio-tempo não voltam.
+pub fn take_pending_events(conn: &Connection) -> Result<Vec<AlertEvent>, String> {
+    let tx = conn.unchecked_transaction().map_err(dberr)?;
+    let rows: Vec<(AlertEvent, bool)> = {
+        let mut stmt = tx
+            .prepare(&format!(
+                "SELECT {EVENT_COLS} FROM alert_events e JOIN items i ON i.id=e.item_id WHERE e.pending=1 ORDER BY e.created_at, e.rowid"
+            ))
+            .map_err(dberr)?;
+        let rs = stmt.query_map([], row_event).map_err(dberr)?;
+        rs.collect::<Result<Vec<_>, _>>().map_err(dberr)?
+    };
+    tx.execute("UPDATE alert_events SET pending=0 WHERE pending=1", []).map_err(dberr)?;
+    tx.commit().map_err(dberr)?;
+    Ok(rows
+        .into_iter()
+        .filter(|(_, bought)| !*bought)
+        .map(|(mut e, _)| {
+            e.pending = false;
+            e
+        })
+        .collect())
+}
+
+pub fn has_pending_events(conn: &Connection) -> bool {
+    conn.query_row("SELECT EXISTS(SELECT 1 FROM alert_events WHERE pending=1)", [], |r| r.get::<_, i64>(0)).map(|v| v != 0).unwrap_or(false)
 }
 
 // ---------------------------------------------------------------- ofertas
@@ -916,6 +1299,18 @@ pub fn load_views(
         }
         m
     };
+    let rules: HashMap<String, AlertRule> = {
+        let mut stmt = conn
+            .prepare(&format!("SELECT {RULE_COLS} FROM alert_rules WHERE (?1 IS NULL OR item_id=?1)"))
+            .map_err(dberr)?;
+        let rows = stmt.query_map(params![only], row_rule).map_err(dberr)?;
+        let mut m = HashMap::new();
+        for r in rows {
+            let r = r.map_err(dberr)?;
+            m.insert(r.item_id.clone(), r);
+        }
+        m
+    };
     let mut offers_by_item: HashMap<String, Vec<ComprasOffer>> = HashMap::new();
     for o in offers {
         offers_by_item.entry(o.item_id.clone()).or_default().push(o);
@@ -942,7 +1337,8 @@ pub fn load_views(
             .filter(|p| p.is_file())
             .map(|p| p.to_string_lossy().into_owned());
         let purchase = purchases.get(&item.id).cloned();
-        views.push(ItemView { item, image_file, offers: offer_views, best, stats: st, purchase });
+        let alert = rules.get(&item.id).cloned();
+        views.push(ItemView { item, image_file, offers: offer_views, best, stats: st, purchase, alert });
     }
     Ok(views)
 }
@@ -1227,7 +1623,8 @@ mod tests {
         migrate(&c).unwrap();
         migrate(&c).unwrap();
         let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(v, 1);
+        assert_eq!(v, SCHEMA_VERSION);
+        assert_eq!(count(&c, "alert_rules"), 0);
         let fk: i64 = c.query_row("PRAGMA foreign_keys", [], |r| r.get(0)).unwrap();
         assert_eq!(fk, 1);
         assert_eq!(list_templates(&c).unwrap().len(), 6);
@@ -1639,5 +2036,388 @@ mod tests {
         seed_offer(&c, &o.id, Extracted::default(), now, 0.5).unwrap();
         assert!(latest_obs(&c, &o.id, false).unwrap().is_none());
         assert_eq!(get_offer(&c, &o.id).unwrap().unwrap().status, OfferStatus::Pending);
+    }
+
+    // ---------------------------------------------------------------- v2: migração, avisos, ajustes
+
+    /// Banco no formato da v1 (como o app antigo deixou), com dados de todos os tipos.
+    fn seed_v1(c: &Connection) {
+        c.pragma_update(None, "foreign_keys", "ON").unwrap();
+        c.execute_batch(SCHEMA_V1).unwrap();
+        c.pragma_update(None, "user_version", 1).unwrap();
+        let t = "2026-10-01T12:00:00Z";
+        for (id, name, target, bought) in [
+            ("i1", "Geladeira", Some(250_000), 0),
+            ("i2", "Cooktop", None, 0),
+            ("i3", "Microondas", Some(80_000), 1),
+        ] {
+            c.execute(
+                "INSERT INTO items(id, category, name, qty, budget_unit_cents, target_cents, notes, bought, specs, priority, created_at, updated_at)
+                 VALUES (?1,'Eletros',?2,1,300000,?3,'',?4,'{}',1,?5,?5)",
+                params![id, name, target, bought, t],
+            )
+            .unwrap();
+        }
+        c.execute(
+            "INSERT INTO offers(id, item_id, store, url, adapter, shipping_cents, status, created_at, next_poll_at)
+             VALUES ('o1','i1','KaBuM','https://www.kabum.com.br/produto/1/x','kabum',1000,'ok',?1,?1)",
+            params![t],
+        )
+        .unwrap();
+        c.execute("INSERT INTO offers(id, item_id, store, adapter, status, created_at) VALUES ('o2','i2','Loja','manual','manual',?1)", params![t]).unwrap();
+        c.execute(
+            "INSERT INTO observations(id, offer_id, list_cents, cash_cents, in_stock, source, confirmed, first_seen_at, last_seen_at)
+             VALUES ('b1','o1',300000,270000,1,'auto',1,?1,?1), ('b2','o1',100000,NULL,1,'auto',0,?1,?1), ('b3','o2',NULL,200000,1,'manual',1,?1,?1)",
+            params![t],
+        )
+        .unwrap();
+        c.execute("INSERT INTO purchases(item_id, paid_unit_cents, shipping_cents, store, purchased_at, notes) VALUES ('i3',75000,0,'Loja',?1,'')", params![t]).unwrap();
+        c.execute(
+            "INSERT INTO settings(key, value) VALUES('settings', ?1)",
+            params![r#"{"pollEnabled":false,"pollIntervalMinutes":90,"amazonMinIntervalMinutes":400,"cep":"01001000","pixDiscountByStore":{"Amazon":5}}"#],
+        )
+        .unwrap();
+    }
+
+    fn count(c: &Connection, table: &str) -> i64 {
+        c.query_row(&format!("SELECT COUNT(*) FROM {table}"), [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn migrates_v1_shaped_db_keeping_data_and_backfilling_rules() {
+        let c = Connection::open_in_memory().unwrap();
+        seed_v1(&c);
+        migrate(&c).unwrap();
+        let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+        assert_eq!((count(&c, "items"), count(&c, "offers"), count(&c, "observations"), count(&c, "purchases")), (3, 2, 3, 1));
+        // observação não confirmada continua não confirmada; compra e flags intactos
+        let unconf: i64 = c.query_row("SELECT COUNT(*) FROM observations WHERE confirmed=0", [], |r| r.get(0)).unwrap();
+        assert_eq!(unconf, 1);
+        assert!(get_item(&c, "i3").unwrap().unwrap().bought);
+        assert_eq!(get_item(&c, "i1").unwrap().unwrap().target_cents, Some(250_000));
+        // backfill: um aviso por item com alvo, ligado, com novo-menor-preço, sem "já avisado" onde o preço está acima
+        assert_eq!(count(&c, "alert_rules"), 2);
+        let r1 = get_rule(&c, "i1").unwrap().unwrap();
+        assert!(r1.enabled && r1.notify_new_low);
+        assert_eq!(r1.target_cents, Some(250_000));
+        assert!(get_rule(&c, "i2").unwrap().is_none());
+        assert_eq!(count(&c, "alert_events"), 0);
+        // configurações v1 carregam sem perder nada e ganham os padrões novos
+        let s = load_settings(&c);
+        assert!(!s.poll_enabled);
+        assert_eq!(s.poll_interval_minutes, 90);
+        assert_eq!(s.amazon_min_interval_minutes, 400);
+        assert_eq!(s.cep.as_deref(), Some("01001000"));
+        assert_eq!(s.pix_discount_by_store.get("Amazon"), Some(&5.0));
+        assert_eq!((s.notify_enabled, s.cooldown_hours, s.max_toasts_per_cycle), (true, 24, 3));
+        // views continuam funcionando e trazem a regra
+        let vs = views(&c);
+        assert_eq!(vs.len(), 3);
+        assert!(vs.iter().find(|v| v.item.id == "i1").unwrap().alert.is_some());
+        assert!(vs.iter().find(|v| v.item.id == "i2").unwrap().alert.is_none());
+        // rodar de novo não mexe em nada
+        migrate(&c).unwrap();
+        assert_eq!(count(&c, "alert_rules"), 2);
+    }
+
+    #[test]
+    fn migration_primes_rules_already_at_target_so_first_poll_does_not_spam() {
+        let c = Connection::open_in_memory().unwrap();
+        seed_v1(&c);
+        // i1: melhor preço final 270000 + 1000 de frete; alvo 250000 -> acima; i2 sem alvo.
+        // Coloca i2 com alvo acima do preço atual (200000) para ele já estar "no alvo".
+        c.execute("UPDATE items SET target_cents=210000 WHERE id='i2'", []).unwrap();
+        migrate(&c).unwrap();
+        // observação de i1 e a manual de i2 estão com status ok/manual
+        let r2 = get_rule(&c, "i2").unwrap().unwrap();
+        assert_eq!(r2.last_alert_cents, Some(200_000), "já no alvo na migração: estado 'avisado', sem evento");
+        assert_eq!(get_rule(&c, "i1").unwrap().unwrap().last_alert_cents, None);
+        assert_eq!(count(&c, "alert_events"), 0);
+    }
+
+    #[test]
+    fn newer_db_version_is_refused() {
+        let c = Connection::open_in_memory().unwrap();
+        seed_v1(&c);
+        c.pragma_update(None, "user_version", SCHEMA_VERSION + 1).unwrap();
+        assert!(migrate(&c).unwrap_err().contains("mais nova"));
+    }
+
+    #[test]
+    fn file_db_is_backed_up_before_migrating_and_fresh_or_current_dbs_are_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("compras.db");
+        {
+            let c = Connection::open(&path).unwrap();
+            seed_v1(&c);
+        }
+        let baks = |dir: &Path| -> Vec<std::path::PathBuf> {
+            let mut v: Vec<_> = std::fs::read_dir(dir)
+                .unwrap()
+                .filter_map(|e| e.ok().map(|e| e.path()))
+                .filter(|p| p.file_name().unwrap().to_string_lossy().starts_with("compras.db.bak-v"))
+                .collect();
+            v.sort();
+            v
+        };
+        let c = open_file(&path).unwrap();
+        let b = baks(dir.path());
+        assert_eq!(b.len(), 1);
+        let name = b[0].file_name().unwrap().to_string_lossy().into_owned();
+        assert!(name.starts_with("compras.db.bak-v1-") && name.len() == "compras.db.bak-v1-".len() + 12, "{name}");
+        // a cópia é o v1 original, intacta
+        let bak = Connection::open(&b[0]).unwrap();
+        let bv: i64 = bak.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(bv, 1);
+        assert_eq!(count(&bak, "items"), 3);
+        assert!(bak.query_row("SELECT COUNT(*) FROM alert_rules", [], |r| r.get::<_, i64>(0)).is_err());
+        assert_eq!(count(&c, "alert_rules"), 2);
+        drop(c);
+        // reabrir um v2 não gera outro backup
+        drop(open_file(&path).unwrap());
+        assert_eq!(baks(dir.path()).len(), 1);
+        // banco novo: nada para salvar
+        let fresh = dir.path().join("sub").join("compras.db");
+        drop(open_file(&fresh).unwrap());
+        assert!(std::fs::read_dir(fresh.parent().unwrap()).unwrap().filter_map(|e| e.ok()).all(|e| !e.file_name().to_string_lossy().contains(".bak-")));
+    }
+
+    /// Manual: `COMPRAS_REAL_DB_COPY=<caminho de uma CÓPIA do banco real> cargo test real_db_copy -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn real_db_copy_migrates_and_reports_counts() {
+        let Ok(p) = std::env::var("COMPRAS_REAL_DB_COPY") else {
+            eprintln!("COMPRAS_REAL_DB_COPY não definido; nada a fazer");
+            return;
+        };
+        let path = std::path::PathBuf::from(p);
+        let tables = ["items", "offers", "observations", "purchases", "templates"];
+        let before: Vec<(String, i64)> = {
+            let c = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).unwrap();
+            let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+            eprintln!("ANTES: user_version={v}");
+            let with_target: i64 = c.query_row("SELECT COUNT(*) FROM items WHERE target_cents IS NOT NULL", [], |r| r.get(0)).unwrap();
+            eprintln!("ANTES: items com target_cents={with_target}");
+            tables.iter().map(|t| (t.to_string(), count(&c, t))).collect()
+        };
+        for (t, n) in &before {
+            eprintln!("ANTES: {t}={n}");
+        }
+        let c = open_file(&path).unwrap();
+        let v: i64 = c.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        eprintln!("DEPOIS: user_version={v}");
+        for (t, n) in &before {
+            let now = count(&c, t);
+            eprintln!("DEPOIS: {t}={now}");
+            if t != "templates" {
+                assert_eq!(now, *n, "{t} mudou");
+            }
+        }
+        eprintln!("DEPOIS: alert_rules={}", count(&c, "alert_rules"));
+        eprintln!("DEPOIS: alert_events={}", count(&c, "alert_events"));
+        let primed: i64 = c.query_row("SELECT COUNT(*) FROM alert_rules WHERE last_alert_cents IS NOT NULL", [], |r| r.get(0)).unwrap();
+        eprintln!("DEPOIS: regras já 'avisadas' (preço atual no alvo na migração)={primed}");
+        let with_target: i64 = c.query_row("SELECT COUNT(*) FROM items WHERE target_cents IS NOT NULL", [], |r| r.get(0)).unwrap();
+        assert_eq!(count(&c, "alert_rules"), with_target);
+        let s = load_settings(&c);
+        eprintln!("DEPOIS: settings pix={:?} cep={:?}", s.pix_discount_by_store, s.cep);
+        let n_views = views(&c).len() as i64;
+        assert_eq!(n_views, before[0].1);
+        let baks: Vec<_> = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().contains(".bak-v"))
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .collect();
+        eprintln!("BACKUPS: {baks:?}");
+    }
+
+    #[test]
+    fn v1_settings_json_loads_without_losing_fields_and_defaults_fill_in() {
+        let v1 = r#"{"pollEnabled":true,"pollIntervalMinutes":120,"amazonMinIntervalMinutes":360,"cep":"01001000","pixDiscountByStore":{"Amazon":5}}"#;
+        let s: ComprasSettings = serde_json::from_str(v1).unwrap();
+        assert_eq!(s.pix_discount_by_store.get("Amazon"), Some(&5.0));
+        assert_eq!(s.cep.as_deref(), Some("01001000"));
+        assert_eq!(s.quiet_start.as_deref(), Some("22:00"));
+        assert_eq!(s.quiet_end.as_deref(), Some("08:00"));
+        assert_eq!((s.max_toasts_per_cycle, s.cooldown_hours), (3, 24));
+        assert!((s.realert_drop_pct - 3.0).abs() < f64::EPSILON && (s.default_target_pct - 10.0).abs() < f64::EPSILON);
+        assert!(s.include_shipping && s.use_pix && s.notify_enabled && s.notify_new_low && s.rooms.is_empty());
+        // JSON vazio e com campos desconhecidos também carregam
+        assert_eq!(serde_json::from_str::<ComprasSettings>("{}").unwrap(), ComprasSettings::default());
+        assert!(serde_json::from_str::<ComprasSettings>(r#"{"futuro":1,"cep":"x"}"#).is_ok());
+        // quiet = null desliga e é respeitado (não volta ao padrão)
+        let off: ComprasSettings = serde_json::from_str(r#"{"quietStart":null,"quietEnd":null}"#).unwrap();
+        assert_eq!((off.quiet_start, off.quiet_end), (None, None));
+    }
+
+    #[test]
+    fn save_settings_normalizes_new_fields() {
+        let c = mem();
+        let mut s = ComprasSettings::default();
+        s.cooldown_hours = 0;
+        s.realert_drop_pct = f64::NAN;
+        s.max_toasts_per_cycle = 99;
+        s.default_target_pct = 500.0;
+        s.quiet_start = Some("7:30".into());
+        s.quiet_end = Some("lixo".into());
+        s.rooms = vec![" Sala ".into(), "sala".into(), "".into(), "Cozinha".into()];
+        let saved = save_settings(&c, s).unwrap();
+        assert_eq!((saved.cooldown_hours, saved.max_toasts_per_cycle), (1, 20));
+        assert!((saved.realert_drop_pct - 3.0).abs() < f64::EPSILON);
+        assert!((saved.default_target_pct - 90.0).abs() < f64::EPSILON);
+        assert_eq!((saved.quiet_start.clone(), saved.quiet_end.clone()), (None, None), "um horário inválido desliga os dois");
+        assert_eq!(saved.rooms, vec!["Sala", "Cozinha"]);
+        assert_eq!(load_settings(&c), saved);
+        let mut ok = ComprasSettings::default();
+        ok.quiet_start = Some("7:30".into());
+        ok.quiet_end = Some("22:15".into());
+        let saved = save_settings(&c, ok).unwrap();
+        assert_eq!((saved.quiet_start.as_deref(), saved.quiet_end.as_deref()), (Some("07:30"), Some("22:15")));
+    }
+
+    #[test]
+    fn target_stays_in_sync_between_items_and_alert_rules() {
+        let c = mem();
+        let it = new_item(&c, "Geladeira", 1, Some(300_000));
+        assert!(get_rule(&c, &it.id).unwrap().is_none(), "sem alvo: sem regra");
+
+        // item -> regra
+        let saved = upsert_item(&c, ComprasItem { target_cents: Some(250_000), ..it.clone() }, NOW).unwrap();
+        assert_eq!(saved.target_cents, Some(250_000));
+        let r = get_rule(&c, &it.id).unwrap().unwrap();
+        assert_eq!((r.enabled, r.target_cents, r.notify_new_low), (true, Some(250_000), true));
+
+        // regra -> item
+        let (r, eval) = apply_rule_edit(&c, AlertRule { item_id: it.id.clone(), target_cents: Some(240_000), notify_new_low: false, ..Default::default() }, NOW).unwrap();
+        assert!(eval && !r.notify_new_low);
+        assert_eq!(get_item(&c, &it.id).unwrap().unwrap().target_cents, Some(240_000));
+
+        // alterar o alvo pelo item zera o "já avisado" e religa
+        set_alert_state(&c, &it.id, Some(230_000), Some(NOW)).unwrap();
+        apply_rule_edit(&c, AlertRule { item_id: it.id.clone(), enabled: false, target_cents: Some(240_000), ..Default::default() }, NOW).unwrap();
+        assert_eq!(get_rule(&c, &it.id).unwrap().unwrap().last_alert_cents, Some(230_000), "alvo igual: estado preservado");
+        let it2 = get_item(&c, &it.id).unwrap().unwrap();
+        upsert_item(&c, ComprasItem { target_cents: Some(200_000), ..it2.clone() }, NOW).unwrap();
+        let r = get_rule(&c, &it.id).unwrap().unwrap();
+        assert_eq!((r.enabled, r.target_cents, r.last_alert_cents, r.last_alert_at), (true, Some(200_000), None, None));
+
+        // remover o alvo pelo item: a regra fica sem alvo
+        upsert_item(&c, ComprasItem { target_cents: None, ..it2 }, NOW).unwrap();
+        assert_eq!(get_rule(&c, &it.id).unwrap().unwrap().target_cents, None);
+
+        // alvo removido pela regra: item também
+        apply_rule_edit(&c, AlertRule { item_id: it.id.clone(), target_cents: Some(100_000), ..Default::default() }, NOW).unwrap();
+        apply_rule_edit(&c, AlertRule { item_id: it.id.clone(), enabled: false, target_cents: None, ..Default::default() }, NOW).unwrap();
+        assert_eq!(get_item(&c, &it.id).unwrap().unwrap().target_cents, None);
+
+        // validações
+        assert!(apply_rule_edit(&c, AlertRule { item_id: it.id.clone(), target_cents: Some(-1), ..Default::default() }, NOW).is_err());
+        assert!(apply_rule_edit(&c, AlertRule { item_id: "nope".into(), ..Default::default() }, NOW).is_err());
+    }
+
+    #[test]
+    fn item_created_with_target_gets_a_rule_and_delete_cascades() {
+        let c = mem();
+        let it = upsert_item(
+            &c,
+            ComprasItem {
+                id: String::new(),
+                category: "Eletros".into(),
+                name: "Forno".into(),
+                qty: 1,
+                budget_unit_cents: None,
+                target_cents: Some(90_000),
+                notes: String::new(),
+                bought: false,
+                image_path: None,
+                specs: BTreeMap::new(),
+                template_id: None,
+                model_token: None,
+                priority: 0,
+                created_at: String::new(),
+                updated_at: String::new(),
+            },
+            NOW,
+        )
+        .unwrap();
+        assert_eq!(get_rule(&c, &it.id).unwrap().unwrap().target_cents, Some(90_000));
+        insert_event(
+            &c,
+            &AlertEvent {
+                id: "e1".into(),
+                item_id: it.id.clone(),
+                offer_id: None,
+                kind: AlertKind::Target,
+                price_cents: 80_000,
+                prev_cents: None,
+                reason: "x".into(),
+                created_at: NOW.into(),
+                pending: false,
+                seen: false,
+                delivered_desktop: false,
+                delivered_discord: false,
+                item_name: String::new(),
+                title: String::new(),
+            },
+        )
+        .unwrap();
+        assert_eq!(list_events(&c, 10, true).unwrap().len(), 1);
+        assert_eq!(list_events(&c, 10, true).unwrap()[0].item_name, "Forno");
+        delete_item(&c, &it.id).unwrap();
+        assert_eq!((count(&c, "alert_rules"), count(&c, "alert_events")), (0, 0));
+    }
+
+    #[test]
+    fn events_seen_delivered_snooze_and_bulk_target() {
+        let c = mem();
+        let a = new_item(&c, "A", 1, None);
+        let b = new_item(&c, "B", 1, None);
+        let mk = |id: &str, item: &str, pending: bool| AlertEvent {
+            id: id.into(),
+            item_id: item.into(),
+            offer_id: None,
+            kind: AlertKind::NewLow,
+            price_cents: 1,
+            prev_cents: Some(2),
+            reason: "r".into(),
+            created_at: format!("2026-11-08T10:0{}:00Z", id.len() % 10),
+            pending,
+            seen: false,
+            delivered_desktop: false,
+            delivered_discord: false,
+            item_name: String::new(),
+            title: String::new(),
+        };
+        insert_event(&c, &mk("e1", &a.id, false)).unwrap();
+        insert_event(&c, &mk("e22", &b.id, true)).unwrap();
+        assert_eq!(list_events(&c, 10, false).unwrap().len(), 2);
+        assert_eq!(mark_events_seen(&c, Some(&["e1".to_string(), "zzz".to_string()])).unwrap(), 1);
+        assert_eq!(list_events(&c, 10, true).unwrap().len(), 1);
+        mark_delivered(&c, &["e22".to_string()], "desktop").unwrap();
+        let all = list_events(&c, 10, false).unwrap();
+        assert!(all.iter().find(|e| e.id == "e22").unwrap().delivered_desktop);
+        assert!(!all.iter().find(|e| e.id == "e22").unwrap().delivered_discord);
+        assert_eq!(mark_events_seen(&c, None).unwrap(), 1);
+        assert!(list_events(&c, 10, true).unwrap().is_empty());
+        // pendentes saem uma vez; item comprado no meio-tempo não volta
+        assert!(has_pending_events(&c));
+        mark_bought(&c, &ComprasPurchase { item_id: b.id.clone(), paid_unit_cents: 1, shipping_cents: 0, store: String::new(), purchased_at: String::new(), notes: String::new() }, NOW).unwrap();
+        assert!(take_pending_events(&c).unwrap().is_empty());
+        assert!(!has_pending_events(&c));
+
+        // snooze exige regra e data válida
+        assert!(set_snooze(&c, &a.id, Some("2026-12-01T00:00:00Z"), NOW).is_err());
+        bulk_set_targets(&c, &[(a.id.clone(), 50_000), ("fantasma".into(), 1)], NOW).unwrap();
+        assert!(set_snooze(&c, &a.id, Some("amanhã"), NOW).is_err());
+        let r = set_snooze(&c, &a.id, Some("2026-12-01T00:00:00Z"), NOW).unwrap();
+        assert_eq!(r.snooze_until.as_deref(), Some("2026-12-01T00:00:00Z"));
+        assert_eq!(set_snooze(&c, &a.id, None, NOW).unwrap().snooze_until, None);
+        assert_eq!(get_item(&c, &a.id).unwrap().unwrap().target_cents, Some(50_000));
+        // editar a regra pela UI não apaga o snooze
+        set_snooze(&c, &a.id, Some("2026-12-01T00:00:00Z"), NOW).unwrap();
+        apply_rule_edit(&c, AlertRule { item_id: a.id.clone(), target_cents: Some(60_000), ..Default::default() }, NOW).unwrap();
+        assert_eq!(get_rule(&c, &a.id).unwrap().unwrap().snooze_until.as_deref(), Some("2026-12-01T00:00:00Z"));
     }
 }
