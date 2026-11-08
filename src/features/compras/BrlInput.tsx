@@ -8,6 +8,9 @@ interface BrlInputProps {
   onChange: (cents: number | null) => void;
   placeholder?: string;
   className?: string;
+  id?: string;
+  /** Overrides for the "R$" prefix (position/size). */
+  prefixClassName?: string;
   disabled?: boolean;
   autoFocus?: boolean;
   /** Fires on blur/Enter with the parsed value. */
@@ -21,6 +24,8 @@ export function BrlInput({
   onChange,
   placeholder = "0,00",
   className,
+  id,
+  prefixClassName,
   disabled,
   autoFocus,
   onCommit,
@@ -37,8 +42,11 @@ export function BrlInput({
 
   return (
     <div className="relative">
-      <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-ink-faint">R$</span>
+      <span className={cn("pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-ink-faint", prefixClassName)}>
+        R$
+      </span>
       <Input
+        id={id}
         inputMode="decimal"
         value={text}
         placeholder={placeholder}

@@ -60,7 +60,7 @@ export function ItemForm({ view, draft, categories, onChange, onPickImage }: Ite
         <Field label="Orçado (un.)" className="col-span-2">
           <BrlInput value={draft.budgetUnitCents} onChange={(c) => onChange({ budgetUnitCents: c })} />
         </Field>
-        <Field label="Alvo (preço final un.)" className="col-span-2">
+        <Field label="Avisar em (preço final un.)" className="col-span-2">
           <BrlInput value={draft.targetCents} onChange={(c) => onChange({ targetCents: c })} />
         </Field>
         <Field label="Prioridade" className="col-span-2">

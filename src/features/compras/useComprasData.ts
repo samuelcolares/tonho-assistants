@@ -4,9 +4,11 @@ import {
   comprasListItems,
   comprasListTemplates,
   comprasPollStatus,
+  onComprasAlert,
   onComprasPollStatus,
   onComprasUpdated,
 } from "@/api";
+import { useToast } from "@/hooks/use-toast";
 import type { BudgetSummary, CategoryTemplate, ItemView, PollStatus } from "@/types";
 import { errorMessage } from "./format";
 
@@ -27,6 +29,10 @@ export function useComprasData(): ComprasData {
   const [pollStatus, setPollStatus] = useState<PollStatus | null>(null);
   const [error, setError] = useState<string | null>(null);
   const alive = useRef(true);
+  const { toast } = useToast();
+  const toastRef = useRef(toast);
+  toastRef.current = toast;
+  const seenAlerts = useRef<Set<string>>(new Set());
 
   const reload = useCallback(async () => {
     try {
@@ -57,12 +63,24 @@ export function useComprasData(): ComprasData {
     };
     const unlistenUpdated = onComprasUpdated(schedule);
     const unlistenStatus = onComprasPollStatus((p) => setPollStatus(p));
+    // In-app toast for each alert (deduped by event id), then refresh so bells/targets reflect the new state.
+    const unlistenAlert = onComprasAlert((ev) => {
+      if (seenAlerts.current.has(ev.id)) return;
+      seenAlerts.current.add(ev.id);
+      toastRef.current({
+        variant: "success",
+        title: ev.title || `Chegou no preço: ${ev.itemName}`,
+        description: ev.reason,
+      });
+      schedule();
+    });
 
     return () => {
       alive.current = false;
       window.clearTimeout(timer);
       unlistenUpdated.then((fn) => fn()).catch(() => {});
       unlistenStatus.then((fn) => fn()).catch(() => {});
+      unlistenAlert.then((fn) => fn()).catch(() => {});
     };
   }, [reload]);
 

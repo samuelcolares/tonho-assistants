@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowLeft, Check, RefreshCw, Save, Trash2, Undo2 } from "lucide-react";
+import { ArrowLeft, Bell, Check, RefreshCw, Save, Trash2, Undo2 } from "lucide-react";
 import {
   comprasDeleteItem,
   comprasGetItem,
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useToast } from "@/hooks/use-toast";
 import type { CategoryTemplate, ComprasItem, ItemView } from "@/types";
 import { AddOfferDialog } from "./AddOfferDialog";
+import { AlertDialog } from "./AlertDialog";
 import { errorMessage, formatDateTime } from "./format";
 import { ImageDialog } from "./ImageDialog";
 import { ItemBadges } from "./ItemBadges";
@@ -24,6 +25,7 @@ import { PriceChart } from "./PriceChart";
 import { ConfirmDialog } from "./shared";
 import { SpecsForm } from "./SpecsForm";
 import { StatsPanel } from "./StatsPanel";
+import { CmButton, CmIconButton } from "./ui";
 import { formatBRL } from "./money";
 
 const NO_TEMPLATE = "__none__";
@@ -58,6 +60,7 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
   const [imageOpen, setImageOpen] = useState(false);
   const [offerOpen, setOfferOpen] = useState(false);
   const [boughtOpen, setBoughtOpen] = useState(false);
+  const [alertOpen, setAlertOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const baseline = useRef<string>("");
@@ -164,29 +167,38 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={onBack}>
+        <CmButton variant="ghost" size="sm" onClick={onBack}>
           <ArrowLeft className="h-4 w-4" /> Voltar
-        </Button>
-        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
-          <h2 className="truncate text-lg font-semibold text-ink">{view.item.name}</h2>
+        </CmButton>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-3">
+          <h2 className="truncate text-[20px] font-bold uppercase text-cm-ink">{view.item.name}</h2>
           <ItemBadges view={view} />
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <Button variant="secondary" size="sm" onClick={refresh}>
+          <CmIconButton
+            active={view.alert?.enabled === true && !view.item.bought}
+            disabled={view.item.bought}
+            aria-label={view.alert?.enabled ? "Editar aviso de preço" : "Avisar quando baixar"}
+            title={view.item.bought ? "Item já comprado" : view.alert?.enabled ? "Aviso ligado" : "Avisar quando baixar"}
+            onClick={() => setAlertOpen(true)}
+          >
+            <Bell className="h-4 w-4" />
+          </CmIconButton>
+          <CmButton size="sm" onClick={refresh}>
             <RefreshCw className="h-4 w-4" /> Atualizar agora
-          </Button>
+          </CmButton>
           {view.item.bought ? (
-            <Button variant="secondary" size="sm" onClick={unmark}>
+            <CmButton size="sm" onClick={unmark}>
               <Undo2 className="h-4 w-4" /> Desfazer compra
-            </Button>
+            </CmButton>
           ) : (
-            <Button size="sm" className="bg-compras text-on-brand hover:bg-compras/85" onClick={() => setBoughtOpen(true)}>
+            <CmButton variant="strong" size="sm" onClick={() => setBoughtOpen(true)}>
               <Check className="h-4 w-4" /> Marcar comprado
-            </Button>
+            </CmButton>
           )}
-          <Button variant="destructive" size="sm" onClick={() => setDeleteOpen(true)}>
+          <CmButton variant="danger-ghost" size="sm" onClick={() => setDeleteOpen(true)}>
             <Trash2 className="h-4 w-4" /> Excluir
-          </Button>
+          </CmButton>
         </div>
       </div>
 
@@ -265,6 +277,7 @@ export function ItemDetail({ id, templates, categories, onBack, onChanged }: Ite
       <ImageDialog open={imageOpen} itemId={id} onClose={() => setImageOpen(false)} onDone={changed} />
       <AddOfferDialog open={offerOpen} itemId={id} itemName={view.item.name} onClose={() => setOfferOpen(false)} onDone={changed} />
       <MarkBoughtDialog view={boughtOpen ? view : null} onClose={() => setBoughtOpen(false)} onDone={changed} />
+      <AlertDialog view={alertOpen ? view : null} onClose={() => setAlertOpen(false)} onDone={changed} />
       <ConfirmDialog
         open={deleteOpen}
         title="Excluir item?"

@@ -1,17 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Columns3, Plus, Search, ShoppingCart, Settings as SettingsIcon } from "lucide-react";
-import { comprasUnmarkBought } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { ArrowDown, ArrowUp, Bell, Columns3, Plus, Search, ShoppingCart, Settings as SettingsIcon } from "lucide-react";
+import { comprasBulkSetTarget, comprasGetSettings, comprasUnmarkBought } from "@/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { ItemView } from "@/types";
+import { AlertDialog } from "./AlertDialog";
 import { deltaVsBudget, uniqueCategories } from "./calc";
 import { errorMessage, normalizeText } from "./format";
 import { ItemsTable, type ColumnPrefs, type ItemGroup } from "./ItemsTable";
 import { MarkBoughtDialog } from "./MarkBoughtDialog";
 import { loadPref, savePref } from "./storage";
+import {
+  CmButton,
+  CmDialog,
+  CmDialogContent,
+  CmDialogDescription,
+  CmDialogFooter,
+  CmDialogTitle,
+  CmIconButton,
+  CmInput,
+} from "./ui";
 import type { ComprasData } from "./useComprasData";
 
 type StatusFilter = "pending" | "bought" | "all";
@@ -84,6 +93,10 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
   const [query, setQuery] = useState("");
   const [colsOpen, setColsOpen] = useState(false);
   const [boughtTarget, setBoughtTarget] = useState<ItemView | null>(null);
+  const [alertTarget, setAlertTarget] = useState<ItemView | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkPct, setBulkPct] = useState(10);
 
   useEffect(() => savePref(PREFS_KEY, prefs), [prefs]);
   const patch = (p: Partial<Prefs>) => setPrefs((prev) => ({ ...prev, ...p }));
@@ -122,6 +135,40 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
   }, [all, category, prefs.status, prefs.sortKey, prefs.sortDir, query]);
 
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
+
+  // Not-bought items that have a price but no enabled alert: candidates for the bulk action.
+  const withoutAlert = useMemo(
+    () => all.filter((v) => !v.item.bought && v.best?.finalCents != null && v.alert?.enabled !== true),
+    [all]
+  );
+
+  const openBulk = () => {
+    setBulkOpen(true);
+    comprasGetSettings()
+      .then((s) => setBulkPct(s.defaultTargetPct > 0 ? s.defaultTargetPct : 10))
+      .catch(() => {});
+  };
+
+  const confirmBulk = async () => {
+    setBulkBusy(true);
+    try {
+      const n = await comprasBulkSetTarget(
+        withoutAlert.map((v) => v.item.id),
+        bulkPct
+      );
+      toast({
+        variant: "success",
+        title: n === 1 ? "Aviso ligado em 1 item" : `Aviso ligado em ${n} itens`,
+        description: `Vamos avisar com ${bulkPct}% abaixo do preço de hoje.`,
+      });
+      setBulkOpen(false);
+      await reload();
+    } catch (e) {
+      toast({ variant: "danger", title: "Não foi possível ligar os avisos", description: errorMessage(e) });
+    } finally {
+      setBulkBusy(false);
+    }
+  };
   const collapsed = useMemo(() => new Set(prefs.collapsed), [prefs.collapsed]);
 
   const toggleGroup = (c: string) => {
@@ -146,24 +193,24 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
   };
 
   if (items == null) {
-    return <p className="py-12 text-center text-sm text-ink-muted">{data.error ?? "Carregando itens…"}</p>;
+    return <p className="py-12 text-center text-sm text-cm-muted">{data.error ?? "Carregando itens…"}</p>;
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center gap-2">
         <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-faint" />
-          <Input
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-cm-muted" />
+          <CmInput
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="Buscar item, spec ou observação…"
-            className="pl-9"
+            className="pl-11"
           />
         </div>
 
         <Select value={category} onValueChange={(v) => patch({ category: v })}>
-          <SelectTrigger className="w-[170px]">
+          <SelectTrigger className="h-12 w-[190px] rounded-none border-cm-hairline bg-cm-card font-light text-cm-ink">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -176,15 +223,15 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
           </SelectContent>
         </Select>
 
-        <div className="inline-flex rounded-md border border-border bg-bg-100 p-0.5">
+        <div className="inline-flex h-12 items-stretch gap-5 border-b border-cm-hairline px-1">
           {(["pending", "bought", "all"] as const).map((s) => (
             <button
               key={s}
               type="button"
               onClick={() => patch({ status: s })}
               className={cn(
-                "rounded-[7px] px-3 py-1.5 text-[12.5px] font-semibold transition-colors",
-                prefs.status === s ? "bg-compras-subtle text-compras" : "text-ink-muted hover:text-ink"
+                "-mb-px border-b-2 px-1 text-[12px] font-bold uppercase tracking-[1.5px] transition-colors",
+                prefs.status === s ? "border-cm-accent text-cm-ink" : "border-transparent text-cm-muted hover:text-cm-ink"
               )}
             >
               {s === "pending" ? "Pendentes" : s === "bought" ? "Comprados" : "Todos"}
@@ -194,7 +241,7 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
 
         <div className="flex items-center gap-1">
           <Select value={prefs.sortKey} onValueChange={(v) => patch({ sortKey: v as SortKey })}>
-            <SelectTrigger className="w-[160px]" aria-label="Ordenar por">
+            <SelectTrigger className="h-12 w-[170px] rounded-none border-cm-hairline bg-cm-card font-light text-cm-ink" aria-label="Ordenar por">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -205,26 +252,23 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
               ))}
             </SelectContent>
           </Select>
-          <Button
-            variant="secondary"
-            size="icon"
-            className="h-9 w-9"
+          <CmIconButton
             disabled={prefs.sortKey === "default"}
             aria-label={prefs.sortDir === "asc" ? "Ordem crescente" : "Ordem decrescente"}
             onClick={() => patch({ sortDir: prefs.sortDir === "asc" ? "desc" : "asc" })}
           >
             {prefs.sortDir === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
-          </Button>
+          </CmIconButton>
         </div>
 
         <div className="relative">
-          <Button variant="secondary" onClick={() => setColsOpen((o) => !o)} aria-expanded={colsOpen}>
+          <CmButton onClick={() => setColsOpen((o) => !o)} aria-expanded={colsOpen}>
             <Columns3 className="h-4 w-4" /> Colunas
-          </Button>
+          </CmButton>
           {colsOpen && (
             <>
               <div className="fixed inset-0 z-20" onClick={() => setColsOpen(false)} />
-              <div className="absolute right-0 z-30 mt-1 flex w-52 flex-col gap-1 rounded-md border border-border bg-bg-200 p-2 shadow-md">
+              <div className="absolute right-0 z-30 mt-1 flex w-56 flex-col gap-1 rounded-none border border-cm-hairline bg-cm-card p-2">
                 {(
                   [
                     ["median", "Mediana"],
@@ -232,7 +276,7 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
                     ["pix", "Pix vs cartão"],
                   ] as const
                 ).map(([k, label]) => (
-                  <label key={k} className="flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-[13px] hover:bg-bg-300">
+                  <label key={k} className="flex cursor-pointer items-center gap-2 px-2 py-2 text-[13px] font-light text-cm-body-strong hover:bg-cm-elevated">
                     <input
                       type="checkbox"
                       className="accent-[#2dc98a]"
@@ -248,12 +292,24 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
         </div>
 
         <div className="flex items-center gap-2">
-          <Button variant="ghost" onClick={onSettings}>
+          <CmButton variant="ghost" onClick={onSettings}>
             <SettingsIcon className="h-4 w-4" /> Configurações
-          </Button>
-          <Button onClick={() => onAdd(category === "all" ? undefined : category)}>
+          </CmButton>
+          <CmButton
+            disabled={withoutAlert.length === 0}
+            onClick={openBulk}
+            title={
+              withoutAlert.length === 0
+                ? "Todos os itens com preço já têm aviso"
+                : `${withoutAlert.length} itens com preço e sem aviso`
+            }
+          >
+            <Bell className="h-4 w-4" /> Avisar todos sem alerta
+            {withoutAlert.length > 0 && <span className="font-light tabular-nums">({withoutAlert.length})</span>}
+          </CmButton>
+          <CmButton variant="strong" onClick={() => onAdd(category === "all" ? undefined : category)}>
             <Plus className="h-4 w-4" /> Novo item
-          </Button>
+          </CmButton>
         </div>
       </div>
 
@@ -263,7 +319,7 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
         <EmptyList message="Nenhum item corresponde aos filtros." />
       ) : (
         <>
-          <p className="text-[12px] text-ink-faint">
+          <p className="text-[12px] font-light text-cm-muted">
             {shown} de {all.length} itens
           </p>
           <ItemsTable
@@ -273,24 +329,47 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
             onToggleGroup={toggleGroup}
             onOpen={onOpen}
             onToggleBought={handleToggleBought}
+            onAlert={setAlertTarget}
           />
         </>
       )}
 
       <MarkBoughtDialog view={boughtTarget} onClose={() => setBoughtTarget(null)} onDone={reload} />
+      <AlertDialog view={alertTarget} onClose={() => setAlertTarget(null)} onDone={reload} />
+
+      <CmDialog open={bulkOpen} onOpenChange={(o) => !o && !bulkBusy && setBulkOpen(false)}>
+        <CmDialogContent className="max-w-md">
+          <CmDialogTitle>Avisar todos sem alerta</CmDialogTitle>
+          <CmDialogDescription>
+            Ligar aviso com {bulkPct}% abaixo do preço atual em {withoutAlert.length}{" "}
+            {withoutAlert.length === 1 ? "item" : "itens"}?
+          </CmDialogDescription>
+          <p className="text-[13px] font-light text-cm-muted">
+            Só entram itens não comprados que já têm preço e ainda não têm aviso ligado. Você pode ajustar cada um depois.
+          </p>
+          <CmDialogFooter>
+            <CmButton disabled={bulkBusy} onClick={() => setBulkOpen(false)}>
+              Cancelar
+            </CmButton>
+            <CmButton variant="strong" disabled={bulkBusy || withoutAlert.length === 0} onClick={confirmBulk}>
+              {bulkBusy ? "Ligando…" : "Ligar avisos"}
+            </CmButton>
+          </CmDialogFooter>
+        </CmDialogContent>
+      </CmDialog>
     </div>
   );
 }
 
 function EmptyList({ message, onAdd }: { message: string; onAdd?: () => void }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border py-14 text-center">
-      <ShoppingCart className="h-8 w-8 text-ink-faint" />
-      <p className="max-w-sm text-sm text-ink-muted">{message}</p>
+    <div className="flex flex-col items-center gap-3 border border-dashed border-cm-hairline py-14 text-center">
+      <ShoppingCart className="h-8 w-8 text-cm-muted" />
+      <p className="max-w-sm text-sm font-light text-cm-body">{message}</p>
       {onAdd && (
-        <Button variant="secondary" onClick={onAdd}>
+        <CmButton onClick={onAdd}>
           <Plus className="h-4 w-4" /> Novo item
-        </Button>
+        </CmButton>
       )}
     </div>
   );

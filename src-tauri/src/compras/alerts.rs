@@ -82,7 +82,7 @@ pub struct Input {
 pub enum Effect {
     /// Grava evento. `toast`: notificar agora. `pending`: notificar quando o horário silencioso acabar.
     Event { kind: AlertKind, toast: bool, pending: bool, also_new_low: bool },
-    /// Preço voltou acima do alvo: limpa `last_alert_*`.
+    /// Preço voltou acima do alvo: limpa só `last_alert_cents` (`last_alert_at` mantém o cooldown).
     Rearm,
 }
 
@@ -140,8 +140,10 @@ pub fn decide(input: &Input, policy: &Policy) -> Option<Decision> {
     // Subiu acima do alvo depois de ter avisado: rearma.
     let rearmed = rule.last_alert_cents.is_some() && target.is_some() && !hit;
     let last = if rearmed { None } else { rule.last_alert_cents };
+    // Sem último preço avisado (nunca avisou ou rearmou), o cooldown desde `last_alert_at` ainda vale:
+    // preço oscilando em torno do alvo não pode furar o intervalo entre avisos.
     let gate_ok = match last {
-        None => true,
+        None => cooldown_passed(rule, input.now, policy.cooldown_hours),
         Some(l) => realert_ok(rule, l, cur, input.now, policy),
     };
     let new_low = policy.notify_new_low
@@ -437,7 +439,7 @@ pub fn evaluate(conn: &Connection, item_id: &str, trigger: Trigger, before: Opti
     let now_s = db::ts(ctx.now);
     match decision.effect {
         Effect::Rearm => {
-            db::set_alert_state(conn, item_id, None, None)?;
+            db::rearm_alert(conn, item_id)?;
             Ok(Vec::new())
         }
         Effect::Event { kind, toast, pending, also_new_low } => {
@@ -566,11 +568,28 @@ mod tests {
                 with_last(i, 95_000, 48);
                 i.candidate = Some(cand(110_000));
             }, Some(Effect::Rearm)),
-            ("after re-arm fires again even inside old cooldown", |i| {
+            ("after re-arm, inside cooldown: nothing (bounce can't bypass cooldown)", |i| {
+                let r = i.rule.as_mut().unwrap();
+                r.last_alert_cents = None;
+                r.last_alert_at = Some(ts_ago(2));
+            }, None),
+            ("after re-arm, cooldown passed: fires", |i| {
+                let r = i.rule.as_mut().unwrap();
+                r.last_alert_cents = None;
+                r.last_alert_at = Some(ts_ago(25));
+            }, Some(fire(AlertKind::Target))),
+            ("never alerted: fires", |i| {
                 let r = i.rule.as_mut().unwrap();
                 r.last_alert_cents = None;
                 r.last_alert_at = None;
             }, Some(fire(AlertKind::Target))),
+            ("new low inside cooldown after re-arm: nothing", |i| {
+                let r = i.rule.as_mut().unwrap();
+                r.last_alert_cents = None;
+                r.last_alert_at = Some(ts_ago(2));
+                i.candidate = Some(cand(110_000));
+                i.prior_low_cents = Some(120_000);
+            }, None),
             ("disabled rule: nothing", |i| i.rule.as_mut().unwrap().enabled = false, None),
             ("no rule: nothing", |i| i.rule = None, None),
             ("bought: nothing", |i| i.bought = true, None),
@@ -946,17 +965,28 @@ mod tests {
         db::add_manual_price(&c, &offer, None, Some(240_000), Some(true), "2026-11-08T12:02:00Z").unwrap();
         assert!(evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k).unwrap().is_empty());
 
-        // sobe: rearma (limpa last_alert_*)
+        // sobe: rearma (limpa só last_alert_cents; last_alert_at mantém o cooldown)
         let before = snapshot(&c, &item, &k);
         db::add_manual_price(&c, &offer, None, Some(270_000), Some(true), "2026-11-08T12:03:00Z").unwrap();
         assert!(evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k).unwrap().is_empty());
         let r = db::get_rule(&c, &item).unwrap().unwrap();
-        assert_eq!((r.last_alert_cents, r.last_alert_at), (None, None));
+        assert_eq!(r.last_alert_cents, None);
+        assert!(r.last_alert_at.is_some(), "cooldown timestamp survives re-arm");
 
-        // cruza de novo: avisa de novo
+        // cruza de novo dentro do cooldown (oscilação): NÃO avisa
         let before = snapshot(&c, &item, &k);
         db::add_manual_price(&c, &offer, None, Some(245_000), Some(true), "2026-11-08T12:04:00Z").unwrap();
-        assert_eq!(evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k).unwrap().len(), 1);
+        assert!(evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k).unwrap().is_empty());
+        assert_eq!(db::list_events(&c, 10, false).unwrap().len(), 1);
+
+        // sobe e cruza de novo depois do cooldown (>= 24h): avisa
+        let k2 = EvalCtx { now: k.now + Duration::hours(25), tz: k.tz, settings: k.settings };
+        let before = snapshot(&c, &item, &k2);
+        db::add_manual_price(&c, &offer, None, Some(280_000), Some(true), "2026-11-09T13:00:00Z").unwrap();
+        evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k2).unwrap();
+        let before = snapshot(&c, &item, &k2);
+        db::add_manual_price(&c, &offer, None, Some(245_000), Some(true), "2026-11-09T13:05:00Z").unwrap();
+        assert_eq!(evaluate(&c, &item, Trigger::ManualPrice, before.as_ref(), &k2).unwrap().len(), 1);
         assert_eq!(db::list_events(&c, 10, false).unwrap().len(), 2);
     }
 

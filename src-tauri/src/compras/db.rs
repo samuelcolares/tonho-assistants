@@ -587,6 +587,13 @@ pub fn set_alert_state(conn: &Connection, item_id: &str, cents: Option<i64>, at:
     Ok(())
 }
 
+/// Preço voltou acima do alvo: limpa só o "último preço avisado". `last_alert_at` fica, para o cooldown
+/// continuar valendo se o preço oscilar em torno do alvo (anti-spam).
+pub fn rearm_alert(conn: &Connection, item_id: &str) -> Result<(), String> {
+    conn.execute("UPDATE alert_rules SET last_alert_cents=NULL WHERE item_id=?1", params![item_id]).map_err(dberr)?;
+    Ok(())
+}
+
 pub fn set_snooze(conn: &Connection, item_id: &str, until: Option<&str>, now: &str) -> Result<AlertRule, String> {
     if let Some(u) = until {
         if DateTime::parse_from_rfc3339(u).is_err() {

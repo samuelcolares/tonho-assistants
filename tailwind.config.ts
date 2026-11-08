@@ -30,6 +30,20 @@ const config: Config = {
         danger: { DEFAULT: "#f87171", subtle: "#2c1414", on: "#1a0505" },
         "focus-ring": "#3b9eff",
 
+        // Compras module visual language (docs/compras-design.md)
+        "cm-canvas": "#000000",
+        "cm-soft": "#0d0d0d",
+        "cm-card": "#1a1a1a",
+        "cm-elevated": "#262626",
+        "cm-hairline": "#3c3c3c",
+        "cm-ink": "#ffffff",
+        "cm-body-strong": "#e6e6e6",
+        "cm-body": "#bbbbbb",
+        "cm-muted": "#8a8a8a",
+        "cm-accent": "#2dc98a",
+        "cm-warn": "#f4b400",
+        "cm-danger": "#ff6b5e",
+
         // shadcn/ui semantic aliases, mapped onto the tokens above so
         // generated components (button, dialog, etc.) pick up our palette
         // without per-component overrides.
@@ -47,6 +61,7 @@ const config: Config = {
       },
       fontFamily: {
         sans: ["Segoe UI", "ui-sans-serif", "system-ui", "sans-serif"],
+        cm: ["Inter", "Segoe UI", "ui-sans-serif", "system-ui", "sans-serif"],
         mono: ["Cascadia Mono", "ui-monospace", "Consolas", "monospace"],
       },
       backgroundImage: {

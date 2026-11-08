@@ -26,7 +26,7 @@ export function ComprasRoot({ page }: { page: ComprasPage }) {
   };
 
   return (
-    <>
+    <div className="-m-6 min-h-[calc(100%+3rem)] bg-cm-canvas p-6 font-cm font-light text-cm-body-strong">
       {selectedId ? (
         <ItemDetail
           key={selectedId}
@@ -54,6 +54,6 @@ export function ComprasRoot({ page }: { page: ComprasPage }) {
         }}
       />
       <SettingsDialog open={settingsOpen} onClose={() => setSettingsOpen(false)} onImported={data.reload} />
-    </>
+    </div>
   );
 }

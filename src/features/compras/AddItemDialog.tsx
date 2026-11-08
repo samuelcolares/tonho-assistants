@@ -1,27 +1,28 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowLeft, ArrowRight } from "lucide-react";
-import { comprasUpsertItem } from "@/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { comprasSetAlert, comprasUpsertItem } from "@/api";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { CategoryTemplate, ItemView } from "@/types";
-import { BrlInput } from "./BrlInput";
+import { emptyRule } from "./alertCalc";
 import { uniqueCategories } from "./calc";
 import { errorMessage } from "./format";
 import { blankItem, createOfferFromDraft } from "./offerActions";
 import { draftIsValid, OfferSourceForm, type OfferDraft } from "./OfferSourceForm";
-import { Field } from "./shared";
 import { suggestTemplate } from "./templates";
+import {
+  CmBrlInput,
+  CmButton,
+  CmChip,
+  CmDialog,
+  CmDialogContent,
+  CmDialogDescription,
+  CmDialogFooter,
+  CmDialogTitle,
+  CmInput,
+  CmLabel,
+} from "./ui";
 
 const NO_TEMPLATE = "__none__";
 
@@ -35,6 +36,26 @@ interface AddItemDialogProps {
   onCreated: (itemId: string) => void;
 }
 
+function CmField({
+  label,
+  hint,
+  className,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={cn("flex min-w-0 flex-col gap-2", className)}>
+      <CmLabel>{label}</CmLabel>
+      {children}
+      {hint && <p className="text-[12px] font-light text-cm-muted">{hint}</p>}
+    </div>
+  );
+}
+
 export function AddItemDialog({ open, items, templates, defaultCategory, onClose, onCreated }: AddItemDialogProps) {
   const { toast } = useToast();
   const [step, setStep] = useState<1 | 2>(1);
@@ -42,6 +63,7 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
   const [category, setCategory] = useState("");
   const [qty, setQty] = useState("1");
   const [budget, setBudget] = useState<number | null>(null);
+  const [alertCents, setAlertCents] = useState<number | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [templateTouched, setTemplateTouched] = useState(false);
   const [draft, setDraft] = useState<OfferDraft | null>(null);
@@ -56,6 +78,7 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
     setCategory(defaultCategory ?? "");
     setQty("1");
     setBudget(null);
+    setAlertCents(null);
     setTemplateId(null);
     setTemplateTouched(false);
     setDraft(null);
@@ -82,9 +105,16 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
         })
       );
       let warning: string | undefined;
+      if (alertCents != null && alertCents > 0) {
+        try {
+          await comprasSetAlert({ ...emptyRule(created.id), enabled: true, targetCents: alertCents });
+        } catch (e) {
+          warning = `Item criado, mas o aviso falhou: ${errorMessage(e)}`;
+        }
+      }
       if (withOffer && draft && draftIsValid(draft)) {
         try {
-          warning = (await createOfferFromDraft(created.id, draft, { saveImage: true })).warning;
+          warning = (await createOfferFromDraft(created.id, draft, { saveImage: true })).warning ?? warning;
         } catch (e) {
           warning = `Item criado, mas a oferta falhou: ${errorMessage(e)}`;
         }
@@ -104,54 +134,51 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader>
-          <DialogTitle>Novo item · passo {step} de 2</DialogTitle>
-          <DialogDescription>
-            {step === 1 ? "Dados básicos e orçamento." : "Opcional: cole o link de uma loja para já acompanhar o preço."}
-          </DialogDescription>
-        </DialogHeader>
+    <CmDialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
+      <CmDialogContent aria-describedby="add-item-desc">
+        <div className="flex flex-col gap-1 pr-8">
+          <CmDialogTitle>Novo item · passo {step} de 2</CmDialogTitle>
+          <CmDialogDescription id="add-item-desc">
+            {step === 1 ? "Dados básicos, orçamento e aviso de preço." : "Opcional: cole o link de uma loja para já acompanhar o preço."}
+          </CmDialogDescription>
+        </div>
 
         {step === 1 ? (
-          <div className="grid grid-cols-6 gap-3">
-            <Field label="Nome" className="col-span-6">
-              <Input
+          <div className="grid grid-cols-6 gap-4">
+            <CmField label="Nome" className="col-span-6">
+              <CmInput
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 placeholder="Ex.: Ar-condicionado 12000 btus inverter"
                 autoFocus
               />
-            </Field>
-            <Field label="Categoria" className="col-span-6">
-              <Input value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Escolha ou digite uma nova" />
+            </CmField>
+            <CmField label="Categoria" className="col-span-6">
+              <CmInput value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Escolha ou digite uma nova" />
               {categories.length > 0 && (
-                <div className="mt-1 flex flex-wrap gap-1.5">
+                <div className="mt-1 flex flex-wrap gap-2">
                   {categories.map((c) => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setCategory(c)}
-                      className={cn(
-                        "rounded-full border px-2.5 py-0.5 text-[11.5px] font-medium transition-colors",
-                        category === c
-                          ? "border-compras bg-compras-subtle text-compras"
-                          : "border-border text-ink-muted hover:text-ink"
-                      )}
-                    >
+                    <CmChip key={c} selected={category === c} className="h-8 px-2.5" onClick={() => setCategory(c)}>
                       {c}
-                    </button>
+                    </CmChip>
                   ))}
                 </div>
               )}
-            </Field>
-            <Field label="Quantidade" className="col-span-2">
-              <Input type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)} />
-            </Field>
-            <Field label="Orçado (un.)" className="col-span-4">
-              <BrlInput value={budget} onChange={setBudget} />
-            </Field>
-            <Field label="Modelo de especificações" className="col-span-6" hint="Sugerido pelo nome; você pode trocar.">
+            </CmField>
+            <CmField label="Quantidade" className="col-span-2">
+              <CmInput type="number" min={0} value={qty} onChange={(e) => setQty(e.target.value)} />
+            </CmField>
+            <CmField label="Orçado (un.)" className="col-span-4">
+              <CmBrlInput value={budget} onChange={setBudget} aria-label="Orçado por unidade" />
+            </CmField>
+            <CmField
+              label="Avisar quando custar até"
+              className="col-span-6"
+              hint="Opcional. Avisamos quando o preço final (com frete) chegar nesse valor."
+            >
+              <CmBrlInput value={alertCents} onChange={setAlertCents} aria-label="Avisar quando custar até" />
+            </CmField>
+            <CmField label="Modelo de especificações" className="col-span-6" hint="Sugerido pelo nome; você pode trocar.">
               <Select
                 value={templateId ?? NO_TEMPLATE}
                 onValueChange={(v) => {
@@ -159,7 +186,7 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
                   setTemplateId(v === NO_TEMPLATE ? null : v);
                 }}
               >
-                <SelectTrigger>
+                <SelectTrigger className="h-12 rounded-none border-cm-hairline bg-cm-card font-light text-cm-ink">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -171,40 +198,40 @@ export function AddItemDialog({ open, items, templates, defaultCategory, onClose
                   ))}
                 </SelectContent>
               </Select>
-            </Field>
+            </CmField>
           </div>
         ) : (
           <OfferSourceForm draft={draft} onChange={setDraft} />
         )}
 
-        <DialogFooter className="items-center">
+        <CmDialogFooter>
           {step === 1 ? (
             <>
-              <Button variant="ghost" onClick={onClose}>
+              <CmButton variant="ghost" onClick={onClose}>
                 Cancelar
-              </Button>
-              <Button variant="secondary" onClick={() => create(false)} disabled={!step1Valid || busy}>
+              </CmButton>
+              <CmButton onClick={() => create(false)} disabled={!step1Valid || busy}>
                 Criar sem link
-              </Button>
-              <Button onClick={() => setStep(2)} disabled={!step1Valid}>
+              </CmButton>
+              <CmButton variant="strong" onClick={() => setStep(2)} disabled={!step1Valid}>
                 Próximo <ArrowRight className="h-4 w-4" />
-              </Button>
+              </CmButton>
             </>
           ) : (
             <>
-              <Button variant="ghost" onClick={() => setStep(1)} disabled={busy}>
+              <CmButton variant="ghost" onClick={() => setStep(1)} disabled={busy}>
                 <ArrowLeft className="h-4 w-4" /> Voltar
-              </Button>
-              <Button variant="secondary" onClick={() => create(false)} disabled={busy}>
+              </CmButton>
+              <CmButton onClick={() => create(false)} disabled={busy}>
                 Criar sem oferta
-              </Button>
-              <Button onClick={() => create(true)} disabled={busy || !draftIsValid(draft)}>
+              </CmButton>
+              <CmButton variant="strong" onClick={() => create(true)} disabled={busy || !draftIsValid(draft)}>
                 {busy ? "Criando…" : "Criar item e oferta"}
-              </Button>
+              </CmButton>
             </>
           )}
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </CmDialogFooter>
+      </CmDialogContent>
+    </CmDialog>
   );
 }
