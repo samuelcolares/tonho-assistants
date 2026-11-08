@@ -405,6 +405,10 @@ pub fn run() {
             compras::compras_ml_status,
             compras::compras_ml_save_credentials,
             compras::compras_ml_clear_credentials,
+            compras::compras_discord_status,
+            compras::compras_discord_save,
+            compras::compras_discord_clear,
+            compras::compras_discord_test,
             quit_app,
         ])
         .setup(|app| {

@@ -17,6 +17,7 @@ import type {
   ComprasPurchase,
   ComprasSettings,
   Extracted,
+  DiscordStatus,
   MlStatus,
   HistoryPoint,
   ImportReport,
@@ -333,6 +334,25 @@ export function comprasMlSaveCredentials(clientId: string, clientSecret: string)
 
 export function comprasMlClearCredentials(): Promise<MlStatus> {
   return invoke("compras_ml_clear_credentials");
+}
+
+// --- Compras: Discord (a URL do webhook vai só para o cofre do Windows) ---
+
+export function comprasDiscordStatus(): Promise<DiscordStatus> {
+  return invoke("compras_discord_status");
+}
+
+/** Valida o formato, envia uma mensagem de teste e só então guarda. */
+export function comprasDiscordSave(url: string): Promise<DiscordStatus> {
+  return invoke("compras_discord_save", { url });
+}
+
+export function comprasDiscordClear(): Promise<DiscordStatus> {
+  return invoke("compras_discord_clear");
+}
+
+export function comprasDiscordTest(): Promise<void> {
+  return invoke("compras_discord_test");
 }
 
 // --- Compras: avisos de preço ---

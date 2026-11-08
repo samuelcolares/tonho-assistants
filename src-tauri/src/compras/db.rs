@@ -291,6 +291,7 @@ pub fn save_settings(conn: &Connection, mut s: ComprasSettings) -> Result<Compra
         }
     }
     s.rooms = rooms;
+    s.discord_mention = super::discord::normalize_mention(&s.discord_mention).to_string();
     let json = serde_json::to_string(&s).map_err(|e| e.to_string())?;
     conn.execute("INSERT INTO settings(key, value) VALUES('settings', ?1) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![json])
         .map_err(dberr)?;

@@ -4,6 +4,7 @@
 pub mod alerts;
 pub mod backup;
 pub mod db;
+pub mod discord;
 pub mod extract;
 pub mod http;
 pub mod images;
@@ -156,12 +157,14 @@ fn snapshot_for(conn: &Connection, settings: &ComprasSettings, item_id: Option<&
 
 /// Entrega os avisos novos: notifica (limite por ciclo, sem segurar o banco), grava o que foi entregue
 /// e emite `compras://alert`. O evento já está no banco antes de qualquer notificação.
+/// Discord segue em thread própria (rede lenta não pode travar o ticker) com as mesmas regras e o mesmo limite.
 fn dispatch(app: &AppHandle, new_alerts: Vec<alerts::NewAlert>) {
     if new_alerts.is_empty() {
         return;
     }
     let Ok(st) = state(app) else { return };
-    let max = st.conn().map(|c| db::load_settings(&c).max_toasts_per_cycle).unwrap_or(3).max(1) as usize;
+    let settings = st.conn().map(|c| db::load_settings(&c)).unwrap_or_default();
+    let max = settings.max_toasts_per_cycle.max(1) as usize;
     let to_toast: Vec<AlertEvent> = new_alerts.iter().filter(|a| a.toast).map(|a| a.event.clone()).collect();
     let mut desktop_ok: Vec<String> = Vec::new();
     if !to_toast.is_empty() {
@@ -182,10 +185,62 @@ fn dispatch(app: &AppHandle, new_alerts: Vec<alerts::NewAlert>) {
             }
         }
     }
+    let to_discord: Vec<AlertEvent> = new_alerts.iter().filter(|a| discord::wants(&a.event, a.toast, &settings)).map(|a| a.event.clone()).collect();
     for a in new_alerts {
         let mut ev = a.event;
         ev.delivered_desktop = desktop_ok.contains(&ev.id);
         let _ = app.emit(EVENT_ALERT, ev);
+    }
+    if !to_discord.is_empty() {
+        spawn_discord(app.clone(), to_discord, settings);
+    }
+}
+
+fn spawn_discord(app: AppHandle, events: Vec<AlertEvent>, settings: ComprasSettings) {
+    let spawned = std::thread::Builder::new().name("compras-discord".to_string()).spawn(move || {
+        if catch_unwind(AssertUnwindSafe(|| deliver_discord(&app, events, &settings))).is_err() {
+            eprintln!("[compras] pânico contido ao enviar avisos ao Discord");
+        }
+    });
+    if let Err(e) = spawned {
+        eprintln!("[compras] não foi possível iniciar o envio ao Discord: {e}");
+    }
+}
+
+/// Melhor esforço: a URL do webhook só é lida do cofre aqui e nunca vai para log. O banco só é tocado
+/// para montar as mensagens e para marcar o que foi entregue; a rede roda sem lock.
+fn deliver_discord(app: &AppHandle, events: Vec<AlertEvent>, settings: &ComprasSettings) {
+    let webhook = match discord::load_webhook() {
+        Ok(Some(w)) => w,
+        Ok(None) => return,
+        Err(e) => {
+            eprintln!("[compras] cofre do Windows indisponível para o Discord: {e}");
+            return;
+        }
+    };
+    let Ok(st) = state(app) else { return };
+    let mention_here = discord::normalize_mention(&settings.discord_mention) == "@here";
+    let contexts = {
+        let Ok(conn) = st.conn() else { return };
+        discord::build_contexts(&conn, &events, mention_here)
+    };
+    let channel = discord::DiscordChannel::new(webhook, mention_here, contexts, discord::ReqwestTransport::new());
+    let plan = alerts::plan_toasts(&events, settings.max_toasts_per_cycle.max(1) as usize);
+    for d in alerts::deliver(&[&channel], &plan) {
+        if d.event_ids.is_empty() {
+            continue;
+        }
+        if let Ok(conn) = st.conn() {
+            if let Err(e) = db::mark_delivered(&conn, &d.event_ids, d.channel) {
+                eprintln!("[compras] falha ao registrar entrega no Discord: {e}");
+            }
+        }
+        // a lista de Alertas recarrega e mostra o selo "Discord"
+        for ev in events.iter().filter(|e| d.event_ids.contains(&e.id)) {
+            let mut ev = ev.clone();
+            ev.delivered_discord = true;
+            let _ = app.emit(EVENT_ALERT, ev);
+        }
     }
 }
 
@@ -750,6 +805,42 @@ pub fn compras_ml_clear_credentials(app: AppHandle) -> Result<mercadolivre::MlSt
     mercadolivre::clear_credentials().map_err(|e| format!("Não foi possível remover do cofre do Windows: {e}"))?;
     state(&app)?.ml.invalidate();
     Ok(mercadolivre::status())
+}
+
+// ---------------------------------------------------------------- Discord (webhook de avisos)
+
+#[tauri::command(async)]
+pub fn compras_discord_status() -> discord::DiscordStatus {
+    discord::status()
+}
+
+/// Valida o formato, manda uma mensagem de teste e só então guarda no cofre do Windows.
+#[tauri::command]
+pub async fn compras_discord_save(url: String) -> Result<discord::DiscordStatus, String> {
+    let webhook = discord::parse_webhook(&url)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        discord::send_test(&discord::ReqwestTransport::new(), &webhook).map_err(|e| e.friendly())?;
+        discord::save_webhook(&webhook).map_err(|e| format!("Não foi possível salvar no cofre do Windows: {e}"))?;
+        Ok(discord::status())
+    })
+    .await
+    .map_err(|e| format!("Falha interna ao validar: {e}"))?
+}
+
+#[tauri::command(async)]
+pub fn compras_discord_clear() -> Result<discord::DiscordStatus, String> {
+    discord::clear_webhook().map_err(|e| format!("Não foi possível remover do cofre do Windows: {e}"))?;
+    Ok(discord::status())
+}
+
+#[tauri::command]
+pub async fn compras_discord_test() -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let webhook = discord::load_webhook()?.ok_or("Conecte um webhook do Discord primeiro.")?;
+        discord::send_test(&discord::ReqwestTransport::new(), &webhook).map_err(|e| e.friendly())
+    })
+    .await
+    .map_err(|e| format!("Falha interna ao enviar: {e}"))?
 }
 
 // ---------------------------------------------------------------- ticker

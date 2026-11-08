@@ -156,6 +156,8 @@ export interface GithubTokenStatus {
 export type OfferAdapter = "generic" | "kabum" | "amazon" | "vtex" | "mercadolivre" | "manual";
 
 export interface MlStatus { configured: boolean; clientId: string | null; }
+/** Webhook do Discord: a URL fica no cofre do Windows; só um trecho para reconhecer vem para a tela. */
+export interface DiscordStatus { configured: boolean; webhookHint: string | null; }
 export type OfferStatus = "pending" | "ok" | "manual" | "suspect" | "blocked" | "broken" | "paused";
 export type SpecKind = "text" | "number" | "bool" | "enum";
 
@@ -356,6 +358,11 @@ export interface ComprasSettings {
   usePix: boolean;
   defaultTargetPct: number;
   rooms: string[];
+  discordEnabled: boolean;
+  discordNewLow: boolean;
+  discordRespectQuietHours: boolean;
+  /** "" or "@here" only. */
+  discordMention: string;
 }
 
 export type AlertKind = "target" | "new_low" | "restock";

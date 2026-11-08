@@ -246,6 +246,14 @@ function EventRow({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
           <span className="text-[14px] font-bold uppercase tracking-[0.5px] text-cm-ink">{e.title}</span>
           {!e.seen && <span className="sr-only">Não visto</span>}
+          {e.deliveredDiscord && (
+            <span
+              title="Este aviso também foi enviado ao Discord"
+              className="border border-cm-hairline px-2 py-0.5 text-[11px] font-bold uppercase tracking-[1px] text-cm-muted"
+            >
+              Discord ✓
+            </span>
+          )}
           {e.pending && (
             <span className="border border-dashed border-cm-hairline px-2 py-0.5 text-[11px] font-bold uppercase tracking-[1px] text-cm-muted">
               Aguardando horário

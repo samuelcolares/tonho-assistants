@@ -360,6 +360,12 @@ pub struct ComprasSettings {
     pub use_pix: bool,
     pub default_target_pct: f64,
     pub rooms: Vec<String>,
+    // ---- v2 (Discord, P10): a URL do webhook NÃO fica aqui, só no cofre do SO
+    pub discord_enabled: bool,
+    pub discord_new_low: bool,
+    pub discord_respect_quiet_hours: bool,
+    /// "" ou "@here" (qualquer outro valor é descartado ao salvar).
+    pub discord_mention: String,
 }
 
 impl Default for ComprasSettings {
@@ -381,6 +387,10 @@ impl Default for ComprasSettings {
             use_pix: true,
             default_target_pct: 10.0,
             rooms: Vec::new(),
+            discord_enabled: false,
+            discord_new_low: true,
+            discord_respect_quiet_hours: true,
+            discord_mention: String::new(),
         }
     }
 }

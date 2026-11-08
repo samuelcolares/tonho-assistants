@@ -5,6 +5,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { ComprasSettings } from "@/types";
 import { DataSection } from "./DataSection";
+import { DiscordSection } from "./DiscordSection";
 import { errorMessage, formatRelative } from "./format";
 import { MlApiSection } from "./MlApiSection";
 import { PixRowsEditor } from "./PixRowsEditor";
@@ -94,10 +95,10 @@ export function SettingsPage({ data }: { data: ComprasData }) {
       <PageHeader state={state} error={error} />
 
       <SettingsSection id="avisos" title="Avisos" description="Como e quando o app avisa que um preço chegou onde você queria.">
-        <SettingRow label="Avisos no Windows" hint="Uma notificação do Windows quando um item chega no preço do aviso.">
-          <CmSwitch aria-label="Avisos no Windows" checked={s.notifyEnabled} onChange={(v) => update({ notifyEnabled: v })} />
+        <SettingRow label="Avisos de preço" hint="Liga ou desliga todos os avisos (Windows e Discord) quando um item chega no preço do aviso.">
+          <CmSwitch aria-label="Avisos de preço" checked={s.notifyEnabled} onChange={(v) => update({ notifyEnabled: v })} />
           <CmButton size="sm" onClick={testNotification} disabled={testing}>
-            {testing ? "Enviando…" : "Testar aviso"}
+            {testing ? "Enviando…" : "Testar no Windows"}
           </CmButton>
         </SettingRow>
         <SettingRow
@@ -194,6 +195,7 @@ export function SettingsPage({ data }: { data: ComprasData }) {
             onChange={(n) => update({ maxToastsPerCycle: n })}
           />
         </SettingRow>
+        <DiscordSection settings={s} update={update} masterOff={notifyOff} />
       </SettingsSection>
 
       <SettingsSection id="precos" title="Preços" description="Como o app compara os preços das lojas.">
