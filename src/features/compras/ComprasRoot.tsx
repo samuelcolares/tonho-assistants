@@ -42,7 +42,7 @@ export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?
       ) : page === "dashboard" || page === "settings" ? (
         <Dashboard data={data} onOpen={setSelectedId} onAdd={() => openAdd()} onSettings={() => setSettingsOpen(true)} />
       ) : (
-        <ItemsView data={data} onOpen={setSelectedId} onAdd={openAdd} onSettings={() => setSettingsOpen(true)} />
+        <ItemsView data={data} onOpen={setSelectedId} onAdd={openAdd} />
       )}
 
       <AddItemDialog

@@ -7,3 +7,5 @@ export { CmLabel } from "./CmLabel";
 export { CmStripe } from "./CmStripe";
 export { VerdictChip, type Verdict } from "./VerdictChip";
 export { CmDialog, CmDialogContent, CmDialogDescription, CmDialogFooter, CmDialogTitle } from "./CmDialog";
+export { CmMenu, CmMenuContent, CmMenuItem, CmMenuLabel, CmMenuSeparator, CmMenuTrigger } from "./CmMenu";
+export { Sparkline } from "./Sparkline";

@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
-import { ArrowDown, ArrowUp, Bell, Columns3, Plus, Search, ShoppingCart, Settings as SettingsIcon } from "lucide-react";
-import { comprasBulkSetTarget, comprasGetSettings, comprasUnmarkBought } from "@/api";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { ArrowUpDown, Bell, Plus, Search, ShoppingCart } from "lucide-react";
+import { comprasBulkSetTarget, comprasDeleteItem, comprasGetSettings, comprasUnmarkBought } from "@/api";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import type { ItemView } from "@/types";
 import { AlertDialog } from "./AlertDialog";
-import { deltaVsBudget, uniqueCategories } from "./calc";
+import { deltaVsBudget } from "./calc";
 import { errorMessage, normalizeText } from "./format";
-import { ItemsTable, type ColumnPrefs, type ItemGroup } from "./ItemsTable";
+import { hasPrice, matchesTab, TAB_HINT, TAB_LABEL, TAB_ORDER, tabCounts, type ItemTab } from "./itemFilters";
+import { ItemsTable, type ItemGroup } from "./ItemsTable";
 import { MarkBoughtDialog } from "./MarkBoughtDialog";
 import { loadPref, savePref } from "./storage";
 import {
@@ -18,40 +18,51 @@ import {
   CmDialogDescription,
   CmDialogFooter,
   CmDialogTitle,
-  CmIconButton,
   CmInput,
+  CmMenu,
+  CmMenuContent,
+  CmMenuItem,
+  CmMenuSeparator,
+  CmMenuTrigger,
 } from "./ui";
 import type { ComprasData } from "./useComprasData";
 
-type StatusFilter = "pending" | "bought" | "all";
 type SortKey = "default" | "name" | "price" | "delta" | "priority";
+/** P7 adds "room" here; the toggle below is already built from this list. */
+type GroupBy = "category";
 
 interface Prefs {
-  category: string;
-  status: StatusFilter;
+  tab: ItemTab;
   sortKey: SortKey;
   sortDir: "asc" | "desc";
-  cols: ColumnPrefs;
+  groupBy: GroupBy;
   collapsed: string[];
 }
 
-const PREFS_KEY = "compras.items.prefs.v1";
-const DEFAULT_PREFS: Prefs = {
-  category: "all",
-  status: "pending",
-  sortKey: "default",
-  sortDir: "asc",
-  cols: { median: false, p25: false, pix: false },
-  collapsed: [],
-};
+const PREFS_KEY = "compras.items.prefs.v2";
+const DEFAULT_PREFS: Prefs = { tab: "all", sortKey: "default", sortDir: "asc", groupBy: "category", collapsed: [] };
 
 const SORT_LABELS: Record<SortKey, string> = {
-  default: "Ordem da planilha",
+  default: "Planilha",
   name: "Nome",
-  price: "Preço atual",
-  delta: "Vs orçado",
+  price: "Preço",
+  delta: "Mais barato vs orçado",
   priority: "Prioridade",
 };
+const SORT_KEYS = Object.keys(SORT_LABELS) as SortKey[];
+
+const GROUP_MODES: { key: GroupBy; label: string }[] = [{ key: "category", label: "Categoria" }];
+
+/** Drops stale/invalid stored values so a bad localStorage entry can never break the screen. */
+function sanitize(p: Prefs): Prefs {
+  return {
+    tab: TAB_ORDER.includes(p.tab) ? p.tab : DEFAULT_PREFS.tab,
+    sortKey: SORT_KEYS.includes(p.sortKey) ? p.sortKey : "default",
+    sortDir: p.sortDir === "desc" ? "desc" : "asc",
+    groupBy: GROUP_MODES.some((m) => m.key === p.groupBy) ? p.groupBy : "category",
+    collapsed: Array.isArray(p.collapsed) ? p.collapsed.filter((c) => typeof c === "string") : [],
+  };
+}
 
 function sortValue(v: ItemView, key: SortKey): number | string | null {
   switch (key) {
@@ -83,17 +94,17 @@ interface ItemsViewProps {
   data: ComprasData;
   onOpen: (id: string) => void;
   onAdd: (category?: string) => void;
-  onSettings: () => void;
 }
 
-export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
+export function ItemsView({ data, onOpen, onAdd }: ItemsViewProps) {
   const { toast } = useToast();
   const { items, reload } = data;
-  const [prefs, setPrefs] = useState<Prefs>(() => loadPref(PREFS_KEY, DEFAULT_PREFS));
+  const [prefs, setPrefs] = useState<Prefs>(() => sanitize(loadPref(PREFS_KEY, DEFAULT_PREFS)));
   const [query, setQuery] = useState("");
-  const [colsOpen, setColsOpen] = useState(false);
   const [boughtTarget, setBoughtTarget] = useState<ItemView | null>(null);
   const [alertTarget, setAlertTarget] = useState<ItemView | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<ItemView | null>(null);
+  const [deleting, setDeleting] = useState(false);
   const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [bulkPct, setBulkPct] = useState(10);
@@ -102,15 +113,14 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
   const patch = (p: Partial<Prefs>) => setPrefs((prev) => ({ ...prev, ...p }));
 
   const all = items ?? [];
-  const categories = useMemo(() => uniqueCategories(all), [all]);
-  const category = categories.includes(prefs.category) ? prefs.category : "all";
+  const counts = useMemo(() => tabCounts(all), [all]);
+  const toBuy = useMemo(() => all.filter((v) => !v.item.bought), [all]);
+  const withAlertOn = useMemo(() => toBuy.filter((v) => v.alert?.enabled === true).length, [toBuy]);
 
   const groups = useMemo<ItemGroup[]>(() => {
     const q = normalizeText(query);
     const filtered = all.filter((v) => {
-      if (category !== "all" && v.item.category !== category) return false;
-      if (prefs.status === "pending" && v.item.bought) return false;
-      if (prefs.status === "bought" && !v.item.bought) return false;
+      if (!matchesTab(v, prefs.tab)) return false;
       if (q) {
         const hay = normalizeText(
           [v.item.name, v.item.category, v.item.notes, v.item.modelToken ?? "", ...Object.values(v.item.specs)].join(" ")
@@ -122,25 +132,23 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
     const order: string[] = [];
     const map = new Map<string, ItemView[]>();
     for (const v of filtered) {
-      if (!map.has(v.item.category)) {
-        map.set(v.item.category, []);
-        order.push(v.item.category);
+      const key = v.item.category;
+      if (!map.has(key)) {
+        map.set(key, []);
+        order.push(key);
       }
-      map.get(v.item.category)!.push(v);
+      map.get(key)!.push(v);
     }
     return order.map((c) => ({
       category: c,
       items: map.get(c)!.slice().sort((a, b) => compare(a, b, prefs.sortKey, prefs.sortDir)),
     }));
-  }, [all, category, prefs.status, prefs.sortKey, prefs.sortDir, query]);
+  }, [all, prefs.tab, prefs.sortKey, prefs.sortDir, query]);
 
   const shown = groups.reduce((n, g) => n + g.items.length, 0);
 
   // Not-bought items that have a price but no enabled alert: candidates for the bulk action.
-  const withoutAlert = useMemo(
-    () => all.filter((v) => !v.item.bought && v.best?.finalCents != null && v.alert?.enabled !== true),
-    [all]
-  );
+  const withoutAlert = useMemo(() => all.filter((v) => !v.item.bought && hasPrice(v) && v.alert?.enabled !== true), [all]);
 
   const openBulk = () => {
     setBulkOpen(true);
@@ -192,150 +200,173 @@ export function ItemsView({ data, onOpen, onAdd, onSettings }: ItemsViewProps) {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    try {
+      await comprasDeleteItem(deleteTarget.item.id);
+      toast({ title: "Item excluído", description: deleteTarget.item.name });
+      setDeleteTarget(null);
+      await reload();
+    } catch (e) {
+      toast({ variant: "danger", title: "Não foi possível excluir", description: errorMessage(e) });
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const chooseSort = (k: SortKey) => patch({ sortKey: k, sortDir: k === "priority" ? "desc" : "asc" });
+
   if (items == null) {
     return <p className="py-12 text-center text-sm text-cm-muted">{data.error ?? "Carregando itens…"}</p>;
   }
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[220px] flex-1">
-          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-cm-muted" />
-          <CmInput
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Buscar item, spec ou observação…"
-            className="pl-11"
-          />
+    <div className="flex flex-col gap-6">
+      <header className="flex flex-wrap items-end justify-between gap-x-6 gap-y-4">
+        <div className="min-w-0">
+          <h1 className="text-[40px] font-bold uppercase leading-[1.1] tracking-[-0.5px] text-cm-ink">Itens</h1>
+          <p className="mt-2 text-[14px] font-light text-cm-body">
+            {toBuy.length} para comprar · {withAlertOn} com alerta ligado
+          </p>
         </div>
-
-        <Select value={category} onValueChange={(v) => patch({ category: v })}>
-          <SelectTrigger className="h-12 w-[190px] rounded-none border-cm-hairline bg-cm-card font-light text-cm-ink">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">Todas as categorias</SelectItem>
-            {categories.map((c) => (
-              <SelectItem key={c} value={c}>
-                {c}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-
-        <div className="inline-flex h-12 items-stretch gap-5 border-b border-cm-hairline px-1">
-          {(["pending", "bought", "all"] as const).map((s) => (
-            <button
-              key={s}
-              type="button"
-              onClick={() => patch({ status: s })}
-              className={cn(
-                "-mb-px border-b-2 px-1 text-[12px] font-bold uppercase tracking-[1.5px] transition-colors",
-                prefs.status === s ? "border-cm-accent text-cm-ink" : "border-transparent text-cm-muted hover:text-cm-ink"
-              )}
-            >
-              {s === "pending" ? "Pendentes" : s === "bought" ? "Comprados" : "Todos"}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-1">
-          <Select value={prefs.sortKey} onValueChange={(v) => patch({ sortKey: v as SortKey })}>
-            <SelectTrigger className="h-12 w-[170px] rounded-none border-cm-hairline bg-cm-card font-light text-cm-ink" aria-label="Ordenar por">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {(Object.keys(SORT_LABELS) as SortKey[]).map((k) => (
-                <SelectItem key={k} value={k}>
-                  {SORT_LABELS[k]}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <CmIconButton
-            disabled={prefs.sortKey === "default"}
-            aria-label={prefs.sortDir === "asc" ? "Ordem crescente" : "Ordem decrescente"}
-            onClick={() => patch({ sortDir: prefs.sortDir === "asc" ? "desc" : "asc" })}
-          >
-            {prefs.sortDir === "asc" ? <ArrowUp className="h-4 w-4" /> : <ArrowDown className="h-4 w-4" />}
-          </CmIconButton>
-        </div>
-
-        <div className="relative">
-          <CmButton onClick={() => setColsOpen((o) => !o)} aria-expanded={colsOpen}>
-            <Columns3 className="h-4 w-4" /> Colunas
-          </CmButton>
-          {colsOpen && (
-            <>
-              <div className="fixed inset-0 z-20" onClick={() => setColsOpen(false)} />
-              <div className="absolute right-0 z-30 mt-1 flex w-56 flex-col gap-1 rounded-none border border-cm-hairline bg-cm-card p-2">
-                {(
-                  [
-                    ["median", "Preço típico"],
-                    ["p25", "Baixo até"],
-                    ["pix", "Pix vs cartão"],
-                  ] as const
-                ).map(([k, label]) => (
-                  <label key={k} className="flex cursor-pointer items-center gap-2 px-2 py-2 text-[13px] font-light text-cm-body-strong hover:bg-cm-elevated">
-                    <input
-                      type="checkbox"
-                      className="accent-[#2dc98a]"
-                      checked={prefs.cols[k]}
-                      onChange={(e) => patch({ cols: { ...prefs.cols, [k]: e.target.checked } })}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </>
+        <div className="flex flex-wrap items-center justify-end gap-3">
+          {withoutAlert.length > 0 && (
+            <CmButton variant="ghost" onClick={openBulk} title={`${withoutAlert.length} itens com preço e sem aviso`}>
+              <Bell className="h-4 w-4" /> Avisar todos sem alerta
+              <span className="font-light tabular-nums">({withoutAlert.length})</span>
+            </CmButton>
           )}
+          <div className="flex items-center gap-2" role="group" aria-label="Agrupar por">
+            <span className="text-[12px] font-bold uppercase tracking-[1.5px] text-cm-muted">Agrupar:</span>
+            {GROUP_MODES.map((m) => (
+              <button
+                key={m.key}
+                type="button"
+                aria-pressed={prefs.groupBy === m.key}
+                onClick={() => patch({ groupBy: m.key })}
+                className={cn(
+                  "h-11 border px-4 text-[12px] font-bold uppercase tracking-[1.5px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-cm-ink",
+                  prefs.groupBy === m.key ? "border-cm-ink text-cm-ink" : "border-cm-hairline text-cm-muted hover:text-cm-ink"
+                )}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <CmButton variant="strong" onClick={() => onAdd()}>
+            <Plus className="h-4 w-4" /> Adicionar
+          </CmButton>
+        </div>
+      </header>
+
+      <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-3 border-b border-cm-hairline">
+        <div className="flex flex-wrap items-end gap-x-5" role="group" aria-label="Filtrar itens">
+          {TAB_ORDER.map((t) => {
+            const active = prefs.tab === t;
+            return (
+              <button
+                key={t}
+                type="button"
+                aria-pressed={active}
+                title={TAB_HINT[t]}
+                onClick={() => patch({ tab: t })}
+                className={cn(
+                  "-mb-px inline-flex h-12 items-center gap-1.5 border-b-2 text-[12px] font-bold uppercase tracking-[1.5px] transition-colors",
+                  "focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-cm-ink",
+                  active ? "border-cm-accent text-cm-ink" : "border-transparent text-cm-body hover:text-cm-ink"
+                )}
+              >
+                {TAB_LABEL[t]}
+                <span className={cn("tabular-nums", t === "target" && counts.target > 0 ? "text-cm-accent" : "text-cm-muted")}>{counts[t]}</span>
+              </button>
+            );
+          })}
         </div>
 
-        <div className="flex items-center gap-2">
-          <CmButton variant="ghost" onClick={onSettings}>
-            <SettingsIcon className="h-4 w-4" /> Configurações
-          </CmButton>
-          <CmButton
-            disabled={withoutAlert.length === 0}
-            onClick={openBulk}
-            title={
-              withoutAlert.length === 0
-                ? "Todos os itens com preço já têm aviso"
-                : `${withoutAlert.length} itens com preço e sem aviso`
-            }
-          >
-            <Bell className="h-4 w-4" /> Avisar todos sem alerta
-            {withoutAlert.length > 0 && <span className="font-light tabular-nums">({withoutAlert.length})</span>}
-          </CmButton>
-          <CmButton variant="strong" onClick={() => onAdd(category === "all" ? undefined : category)}>
-            <Plus className="h-4 w-4" /> Novo item
-          </CmButton>
+        <div className="mb-1.5 ml-auto flex items-center gap-2">
+          <div className="relative w-[190px]">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-cm-muted" aria-hidden />
+            <CmInput
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Buscar item…"
+              aria-label="Buscar item, spec ou observação"
+              className="h-10 pl-10 pr-3 text-[13px]"
+            />
+          </div>
+          <CmMenu>
+            <CmMenuTrigger asChild>
+              <CmButton
+                variant="ghost"
+                size="sm"
+                aria-label={`Ordenar. Atual: ${SORT_LABELS[prefs.sortKey]}`}
+                title={`Ordenar: ${SORT_LABELS[prefs.sortKey]}`}
+                className="relative h-10 w-10 px-0"
+              >
+                <ArrowUpDown className="h-4 w-4" aria-hidden />
+                {prefs.sortKey !== "default" && <span aria-hidden className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-cm-accent" />}
+              </CmButton>
+            </CmMenuTrigger>
+            <CmMenuContent>
+              {SORT_KEYS.map((k) => (
+                <CmMenuItem key={k} selected={prefs.sortKey === k} onSelect={() => chooseSort(k)}>
+                  {SORT_LABELS[k]}
+                </CmMenuItem>
+              ))}
+              <CmMenuSeparator />
+              <CmMenuItem disabled={prefs.sortKey === "default"} onSelect={(e) => { e.preventDefault(); patch({ sortDir: prefs.sortDir === "asc" ? "desc" : "asc" }); }}>
+                Ordem: {prefs.sortDir === "asc" ? "crescente" : "decrescente"} (inverter)
+              </CmMenuItem>
+            </CmMenuContent>
+          </CmMenu>
         </div>
       </div>
 
       {all.length === 0 ? (
         <EmptyList onAdd={() => onAdd()} message="Nenhum item ainda. Importe a planilha pelo Painel ou adicione manualmente." />
       ) : shown === 0 ? (
-        <EmptyList message="Nenhum item corresponde aos filtros." />
+        <EmptyList
+          message={
+            query
+              ? "Nenhum item corresponde à busca."
+              : prefs.tab === "target"
+                ? "Nenhum item chegou no preço desejado ainda."
+                : "Nenhum item nesta aba."
+          }
+        />
       ) : (
-        <>
-          <p className="text-[12px] font-light text-cm-muted">
-            {shown} de {all.length} itens
-          </p>
-          <ItemsTable
-            groups={groups}
-            cols={prefs.cols}
-            collapsed={collapsed}
-            onToggleGroup={toggleGroup}
-            onOpen={onOpen}
-            onToggleBought={handleToggleBought}
-            onAlert={setAlertTarget}
-          />
-        </>
+        <ItemsTable
+          groups={groups}
+          collapsed={collapsed}
+          onToggleGroup={toggleGroup}
+          onOpen={onOpen}
+          onToggleBought={handleToggleBought}
+          onAlert={setAlertTarget}
+          onDelete={setDeleteTarget}
+        />
       )}
 
       <MarkBoughtDialog view={boughtTarget} onClose={() => setBoughtTarget(null)} onDone={reload} />
       <AlertDialog view={alertTarget} onClose={() => setAlertTarget(null)} onDone={reload} />
+
+      <CmDialog open={deleteTarget != null} onOpenChange={(o) => !o && !deleting && setDeleteTarget(null)}>
+        <CmDialogContent className="max-w-md">
+          <CmDialogTitle>Excluir item?</CmDialogTitle>
+          <CmDialogDescription>
+            “{deleteTarget?.item.name}” será apagado junto com ofertas, histórico de preços, compra e imagem. Isso não pode ser desfeito.
+          </CmDialogDescription>
+          <CmDialogFooter>
+            <CmButton disabled={deleting} onClick={() => setDeleteTarget(null)}>
+              Cancelar
+            </CmButton>
+            <CmButton variant="strong" disabled={deleting} onClick={confirmDelete}>
+              {deleting ? "Excluindo…" : "Excluir item"}
+            </CmButton>
+          </CmDialogFooter>
+        </CmDialogContent>
+      </CmDialog>
 
       <CmDialog open={bulkOpen} onOpenChange={(o) => !o && !bulkBusy && setBulkOpen(false)}>
         <CmDialogContent className="max-w-md">
@@ -368,7 +399,7 @@ function EmptyList({ message, onAdd }: { message: string; onAdd?: () => void }) 
       <p className="max-w-sm text-sm font-light text-cm-body">{message}</p>
       {onAdd && (
         <CmButton onClick={onAdd}>
-          <Plus className="h-4 w-4" /> Novo item
+          <Plus className="h-4 w-4" /> Adicionar
         </CmButton>
       )}
     </div>
