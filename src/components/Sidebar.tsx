@@ -1,7 +1,8 @@
 import type { ComponentType } from "react";
-import { Bell, Folder, GitBranch, History, LayoutDashboard, Lock, Settings, ShoppingCart, SlidersHorizontal, Zap } from "lucide-react";
+import { Bell, BellRing, Folder, GitBranch, History, LayoutDashboard, Lock, Settings, ShoppingCart, SlidersHorizontal, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Switch } from "@/components/ui/switch";
+import { useUnseenAlerts } from "@/features/compras/useUnseenAlerts";
 import logoAntonio from "@/assets/logos/logo-antonio.png";
 import logoDante from "@/assets/logos/logo-dante.png";
 import logoBonnie from "@/assets/logos/logo-bonnie.png";
@@ -16,6 +17,7 @@ export type View =
   | "repos"
   | "compras-dashboard"
   | "compras-items"
+  | "compras-alerts"
   | "compras-settings"
   | "settings";
 
@@ -39,6 +41,7 @@ const BONNIE_ITEMS: NavItem[] = [
 const COMPRAS_ITEMS: NavItem[] = [
   { key: "compras-dashboard", label: "Painel", icon: LayoutDashboard },
   { key: "compras-items", label: "Itens", icon: ShoppingCart },
+  { key: "compras-alerts", label: "Alertas", icon: BellRing },
   { key: "compras-settings", label: "Configurações", icon: SlidersHorizontal },
 ];
 
@@ -52,6 +55,8 @@ interface DogGroupProps {
   items: NavItem[];
   view: View;
   onChangeView: (v: View) => void;
+  /** Unseen-count badges by view key. */
+  badges?: Partial<Record<View, number>>;
 }
 
 function DogGroup({
@@ -64,6 +69,7 @@ function DogGroup({
   items,
   view,
   onChangeView,
+  badges,
 }: DogGroupProps) {
   return (
     <div className="flex flex-col gap-1">
@@ -92,7 +98,15 @@ function DogGroup({
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {item.label}
+              <span className="flex-1">{item.label}</span>
+              {(badges?.[item.key] ?? 0) > 0 && (
+                <span
+                  className="min-w-[18px] bg-compras px-1.5 text-center text-[10.5px] font-bold leading-[18px] tabular-nums text-black"
+                  aria-label={`${badges?.[item.key]} avisos não vistos`}
+                >
+                  {(badges?.[item.key] ?? 0) > 99 ? "99+" : badges?.[item.key]}
+                </span>
+              )}
             </button>
           );
         })}
@@ -111,6 +125,7 @@ interface SidebarProps {
 
 export function Sidebar({ view, onChangeView, status, autostart, onToggleAutostart }: SidebarProps) {
   const settingsActive = view === "settings";
+  const unseenAlerts = useUnseenAlerts();
 
   return (
     <nav className="flex h-full w-[232px] shrink-0 flex-col bg-bg-100" style={{ WebkitAppRegion: "drag" } as React.CSSProperties }>
@@ -169,6 +184,7 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
           items={COMPRAS_ITEMS}
           view={view}
           onChangeView={onChangeView}
+          badges={{ "compras-alerts": unseenAlerts }}
         />
       </div>
 

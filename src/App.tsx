@@ -122,6 +122,7 @@ const VIEW_TITLES: Record<View, string> = {
   repos: "Repos",
   "compras-dashboard": "Compras · Painel",
   "compras-items": "Compras · Itens",
+  "compras-alerts": "Compras · Alertas",
   "compras-settings": "Compras · Configurações",
   settings: "Configurações",
 };
@@ -306,6 +307,9 @@ export default function App() {
           {view === "repos" && <RepoStatsView />}
           {view === "compras-dashboard" && <ComprasRoot key={view} page="dashboard" />}
           {view === "compras-items" && <ComprasRoot key={view} page="items" />}
+          {view === "compras-alerts" && (
+            <ComprasRoot key={view} page="alerts" onGoItems={() => setView("compras-items")} />
+          )}
           {view === "compras-settings" && <ComprasRoot key={view} page="settings" />}
           {view === "settings" && <SettingsView config={config} onUpdate={update} />}
         </main>

@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from "react";
 import { AddItemDialog } from "./AddItemDialog";
+import { AlertsView } from "./AlertsView";
 import { uniqueCategories } from "./calc";
 import { Dashboard } from "./Dashboard";
 import { ItemDetail } from "./ItemDetail";
@@ -7,10 +8,10 @@ import { ItemsView } from "./ItemsView";
 import { SettingsDialog } from "./SettingsDialog";
 import { useComprasData } from "./useComprasData";
 
-export type ComprasPage = "dashboard" | "items" | "settings";
+export type ComprasPage = "dashboard" | "items" | "alerts" | "settings";
 
 /** Entry point of the Compras module: owns data, drill-in selection and shared dialogs. */
-export function ComprasRoot({ page }: { page: ComprasPage }) {
+export function ComprasRoot({ page, onGoItems }: { page: ComprasPage; onGoItems?: () => void }) {
   const data = useComprasData();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [addOpen, setAddOpen] = useState(false);
@@ -36,6 +37,8 @@ export function ComprasRoot({ page }: { page: ComprasPage }) {
           onBack={closeDetail}
           onChanged={data.reload}
         />
+      ) : page === "alerts" ? (
+        <AlertsView data={data} onOpen={setSelectedId} onGoItems={onGoItems ?? (() => {})} />
       ) : page === "dashboard" || page === "settings" ? (
         <Dashboard data={data} onOpen={setSelectedId} onAdd={() => openAdd()} onSettings={() => setSettingsOpen(true)} />
       ) : (
