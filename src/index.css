@@ -11,7 +11,7 @@ body,
 
 body {
   overflow: hidden;
-  @apply bg-bg-000 text-ink font-sans;
+  @apply bg-bg-000 font-sans font-light text-ink;
 }
 
 ::-webkit-scrollbar {
@@ -24,16 +24,16 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  @apply bg-border rounded-full;
+  @apply rounded-none bg-border;
 }
 
 ::-webkit-scrollbar-thumb:hover {
   @apply bg-border-strong;
 }
 
-/* Compras: every focusable thing gets a visible white ring on black, even when a component forgot its own.
+/* Every focusable thing gets a visible white ring on black, even when a component forgot its own.
    :where() keeps the specificity low so the components' own focus styles still win. */
-:where(.font-cm) :focus-visible {
+:where(*):focus-visible {
   outline: 2px solid #ffffff;
   outline-offset: 2px;
 }

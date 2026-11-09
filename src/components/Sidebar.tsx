@@ -50,8 +50,7 @@ interface DogGroupProps {
   role: string;
   logo: string;
   ringClass: string;
-  activeBgClass: string;
-  activeTextClass: string;
+  activeBorderClass: string;
   items: NavItem[];
   view: View;
   onChangeView: (v: View) => void;
@@ -64,8 +63,7 @@ function DogGroup({
   role,
   logo,
   ringClass,
-  activeBgClass,
-  activeTextClass,
+  activeBorderClass,
   items,
   view,
   onChangeView,
@@ -73,18 +71,18 @@ function DogGroup({
 }: DogGroupProps) {
   return (
     <div className="flex flex-col gap-1">
-      <div className="flex items-center gap-2.5 px-2 pb-1">
+      <div className="flex items-center gap-2.5 px-3 pb-2">
         <img
           src={logo}
           alt={name}
-          className={cn("h-8 w-8 shrink-0 rounded-full object-cover ring-[1.5px]", ringClass)}
+          className={cn("h-8 w-8 shrink-0 rounded-none object-cover ring-1", ringClass)}
         />
         <div className="flex min-w-0 flex-col leading-tight">
-          <strong className="truncate text-[13px] font-semibold text-ink">{name}</strong>
-          <span className="truncate text-[11px] text-ink-muted">{role}</span>
+          <strong className="truncate text-[11px] font-bold uppercase tracking-[1.5px] text-ink-muted">{name}</strong>
+          <span className="truncate text-[11px] font-light text-ink-faint">{role}</span>
         </div>
       </div>
-      <div className="flex flex-col gap-0.5 pl-1">
+      <div className="flex flex-col">
         {items.map((item) => {
           const active = view === item.key;
           const Icon = item.icon;
@@ -93,8 +91,8 @@ function DogGroup({
               key={item.key}
               onClick={() => onChangeView(item.key)}
               className={cn(
-                "flex items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-medium transition-colors",
-                active ? cn(activeBgClass, activeTextClass) : "text-ink-muted hover:bg-bg-200 hover:text-ink"
+                "flex min-h-[44px] items-center gap-2.5 border-l-[3px] px-3 py-2 text-left text-[13px] font-bold uppercase tracking-[0.5px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink",
+                active ? cn(activeBorderClass, "bg-bg-200 text-ink") : "border-transparent text-ink-muted hover:bg-bg-100 hover:text-ink"
               )}
             >
               <Icon className="h-4 w-4 shrink-0" />
@@ -128,12 +126,12 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
   const unseenAlerts = useUnseenAlerts();
 
   return (
-    <nav className="flex h-full w-[232px] shrink-0 flex-col bg-bg-100" style={{ WebkitAppRegion: "drag" } as React.CSSProperties }>
+    <nav className="flex h-full w-[232px] shrink-0 flex-col border-r border-border bg-bg-000" style={{ WebkitAppRegion: "drag" } as React.CSSProperties }>
       <div className="flex items-center gap-2.5 px-4 py-5" style={{ WebkitAppRegion: "drag" } as React.CSSProperties }>
-        <img src={logoGeneral} alt="Tonho Assistants" className="h-9 w-9 rounded-full object-cover" />
+        <img src={logoGeneral} alt="Tonho Assistants" className="h-9 w-9 rounded-none object-cover" />
         <div className="flex flex-col leading-tight">
-          <strong className="text-[15px] font-bold text-ink">Tonho</strong>
-          <span className="text-[10.5px] uppercase tracking-wide text-ink-faint">Assistants</span>
+          <strong className="text-[18px] font-bold uppercase tracking-[1.5px] text-ink">Tonho</strong>
+          <span className="text-[11px] font-bold uppercase tracking-[1.5px] text-ink-faint">Assistants</span>
         </div>
       </div>
 
@@ -146,8 +144,7 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
           role="Organização de arquivos"
           logo={logoAntonio}
           ringClass="ring-antonio"
-          activeBgClass="bg-antonio-subtle"
-          activeTextClass="text-antonio"
+          activeBorderClass="border-antonio"
           items={ANTONIO_ITEMS}
           view={view}
           onChangeView={onChangeView}
@@ -157,8 +154,7 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
           role="Lembretes & agenda"
           logo={logoDante}
           ringClass="ring-dante"
-          activeBgClass="bg-dante-subtle"
-          activeTextClass="text-dante"
+          activeBorderClass="border-dante"
           items={DANTE_ITEMS}
           view={view}
           onChangeView={onChangeView}
@@ -168,8 +164,7 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
           role="Vault de informações"
           logo={logoBonnie}
           ringClass="ring-bonnie"
-          activeBgClass="bg-bonnie-subtle"
-          activeTextClass="text-bonnie"
+          activeBorderClass="border-bonnie"
           items={BONNIE_ITEMS}
           view={view}
           onChangeView={onChangeView}
@@ -179,8 +174,7 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
           role="Preços & orçamento"
           logo={logoGeneral}
           ringClass="ring-compras"
-          activeBgClass="bg-compras-subtle"
-          activeTextClass="text-compras"
+          activeBorderClass="border-compras"
           items={COMPRAS_ITEMS}
           view={view}
           onChangeView={onChangeView}
@@ -188,12 +182,12 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
         />
       </div>
 
-      <div className="border-t border-border px-3 py-3" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties }>
+      <div className="border-t border-border py-2" style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties }>
         <button
           onClick={() => onChangeView("settings")}
           className={cn(
-            "flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-[13px] font-medium transition-colors",
-            settingsActive ? "bg-bg-200 text-ink" : "text-ink-muted hover:bg-bg-200 hover:text-ink"
+            "flex min-h-[44px] w-full items-center gap-2.5 border-l-[3px] px-3 py-2 text-left text-[13px] font-bold uppercase tracking-[0.5px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink",
+            settingsActive ? "border-ink bg-bg-200 text-ink" : "border-transparent text-ink-muted hover:bg-bg-100 hover:text-ink"
           )}
         >
           <Settings className="h-4 w-4 shrink-0" />
@@ -206,7 +200,7 @@ export function Sidebar({ view, onChangeView, status, autostart, onToggleAutosta
         style={{ WebkitAppRegion: "no-drag" } as React.CSSProperties }
       >
         <StatusPill status={status} />
-        <label className="flex items-center justify-between gap-2 text-[11.5px] text-ink-muted">
+        <label className="flex items-center justify-between gap-2 text-[11.5px] font-light text-ink-muted">
           <span>Iniciar com o Windows</span>
           <Switch checked={autostart} onCheckedChange={onToggleAutostart} />
         </label>
@@ -223,7 +217,7 @@ function StatusPill({ status }: { status: "running" | "stopped" | "error" }) {
   } as const;
   const { label, dot, text } = map[status];
   return (
-    <span className={cn("inline-flex w-fit items-center gap-1.5 text-[11.5px] font-semibold", text)}>
+    <span className={cn("inline-flex w-fit items-center gap-1.5 text-[11px] font-bold uppercase tracking-[1.5px]", text)}>
       <span className={cn("h-1.5 w-1.5 rounded-full", dot)} />
       {label}
     </span>

@@ -11,9 +11,9 @@ export interface RuleCardProps {
 
 export function RuleCard({ title, description, active, onToggle, actions }: RuleCardProps) {
   return (
-    <div className="flex items-center gap-3 rounded-lg border border-border bg-bg-100 p-4">
+    <div className="flex items-center gap-3 rounded-none border border-border bg-bg-100 p-4">
       <div className="min-w-0 flex-1">
-        <p className={cn("text-sm font-semibold", active ? "text-ink" : "text-ink-muted")}>
+        <p className={cn("text-[14px] font-bold uppercase tracking-[1px]", active ? "text-ink" : "text-ink-muted")}>
           {title}
         </p>
         <p className={cn("mt-0.5 text-[13px]", active ? "text-ink-muted" : "text-ink-faint")}>

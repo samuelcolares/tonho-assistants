@@ -9,22 +9,22 @@ export interface ToastProps {
 }
 
 const variantClasses: Record<ToastVariant, string> = {
-  default: "border-border",
-  success: "border-success/40",
-  warning: "border-warning/40",
-  danger: "border-danger/40",
+  default: "border-l-ink",
+  success: "border-l-success",
+  warning: "border-l-warning",
+  danger: "border-l-danger",
 };
 
 export function Toast({ variant = "default", title, description }: ToastProps) {
   return (
     <div
       className={cn(
-        "w-full max-w-sm rounded-lg border bg-bg-200 p-3.5 shadow-lg",
+        "w-full max-w-sm rounded-none border border-border border-l-4 bg-bg-000 p-4",
         variantClasses[variant]
       )}
     >
-      {title && <p className="text-sm font-semibold text-ink">{title}</p>}
-      {description && <p className="mt-0.5 text-[13px] text-ink-muted">{description}</p>}
+      {title && <p className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink">{title}</p>}
+      {description && <p className="mt-0.5 text-[13px] font-light text-ink-muted">{description}</p>}
     </div>
   );
 }

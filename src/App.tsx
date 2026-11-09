@@ -173,7 +173,7 @@ export default function App() {
   if (!config) {
     return (
       <div className="flex h-screen flex-col items-center justify-center gap-4 bg-bg-000">
-        <div className="h-10 w-10 animate-pulse rounded-full bg-brand-gradient shadow-[0_0_40px_4px_rgba(124,92,255,0.45)]" />
+        <div className="h-1 w-24 animate-pulse bg-ink" />
         <p className="text-sm text-ink-muted">Iniciando Tonho Assistants…</p>
       </div>
     );
@@ -265,8 +265,8 @@ export default function App() {
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-center justify-between border-b border-border px-6 py-4">
-          <h1 className="text-[22px] font-semibold leading-7 text-ink">{VIEW_TITLES[view]}</h1>
+        <header className="flex items-center justify-between gap-4 border-b border-border px-8 py-5">
+          <h1 className="text-[40px] font-bold uppercase leading-[1.1] tracking-[-0.5px] text-ink">{VIEW_TITLES[view]}</h1>
           {!view.startsWith("compras-") && (
             <Button onClick={handleSave} disabled={!dirty || saving}>
               {saving ? "Salvando…" : "Salvar alterações"}
@@ -274,7 +274,7 @@ export default function App() {
           )}
         </header>
 
-        <main className="flex-1 overflow-y-auto p-6">
+        <main className="flex-1 overflow-y-auto p-8">
           {view === "watchers" && (
             <WatchersView
               config={config}
@@ -328,7 +328,7 @@ export default function App() {
 function EmptyState({ title, description }: { title: string; description: string }) {
   return (
     <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-      <p className="text-sm font-semibold text-ink">{title}</p>
+      <p className="text-[14px] font-bold uppercase tracking-[1.5px] text-ink">{title}</p>
       <p className="max-w-xs text-sm text-ink-muted">{description}</p>
     </div>
   );
@@ -470,13 +470,13 @@ function WatcherCard({
       <div className="flex items-center gap-3">
         <Folder className="h-4 w-4 shrink-0 text-antonio" />
         <Input
-          className="flex-1 border-none bg-transparent p-0 text-[14.5px] font-semibold shadow-none focus-visible:ring-0"
+          className="flex-1 border-none bg-transparent p-0 text-[14.5px] font-bold shadow-none focus-visible:ring-0"
           value={watcher.name}
           onChange={(e) => onChange({ name: e.target.value })}
           placeholder="Nome da pasta monitorada"
         />
         <Switch checked={watcher.enabled} onCheckedChange={(v) => onChange({ enabled: v })} />
-        <Button variant="ghost" size="icon" onClick={onRequestDelete} className="hover:bg-danger-subtle hover:text-danger">
+        <Button variant="ghost" size="icon" onClick={onRequestDelete} className="hover:text-danger">
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -553,15 +553,15 @@ function cnDisabled(disabled: boolean, base: string) {
 }
 
 function MiniEmpty({ text }: { text: string }) {
-  return <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-[12px] text-ink-faint">{text}</p>;
+  return <p className="rounded-none border border-dashed border-border px-3 py-4 text-center text-[12px] font-light text-ink-faint">{text}</p>;
 }
 
 function RuleGroup({ title, onAdd, children }: { title: string; onAdd: () => void; children: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-3">
       <div className="flex items-center justify-between">
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">{title}</h3>
-        <Button variant="ghost" size="sm" onClick={onAdd} className="h-6 px-2 text-[11.5px]">
+        <h3 className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">{title}</h3>
+        <Button variant="ghost" size="sm" onClick={onAdd} className="h-10 px-3 text-[11.5px]">
           <Plus className="h-3 w-3" /> Adicionar
         </Button>
       </div>
@@ -585,33 +585,33 @@ function ExtensionRuleForm({
   };
 
   return (
-    <div className={cnDisabled(!rule.enabled, "flex flex-col gap-2 rounded-md border border-border bg-bg-200 p-3")}>
+    <div className={cnDisabled(!rule.enabled, "flex flex-col gap-2 rounded-none border border-border bg-bg-100 p-4")}>
       <div className="flex items-center gap-2">
         <Input
-          className="h-7 flex-1 text-[12.5px] font-semibold"
+          className="h-10 flex-1 text-[12.5px] font-bold"
           value={rule.name}
           onChange={(e) => onChange({ ...rule, name: e.target.value })}
           placeholder="Nome da regra"
         />
         <Switch checked={rule.enabled} onCheckedChange={(v) => onChange({ ...rule, enabled: v })} />
-        <Button variant="ghost" size="icon" onClick={onRemove} className="h-6 w-6 hover:bg-danger-subtle hover:text-danger">
+        <Button variant="ghost" size="icon" onClick={onRemove} className="h-10 w-10 hover:text-danger">
           <Trash2 className="h-3 w-3" />
         </Button>
       </div>
       <Input
-        className="h-7 text-[12.5px]"
+        className="h-10 text-[12.5px]"
         value={rule.extensions.join(", ")}
         onChange={(e) => onChange({ ...rule, extensions: parseExtensions(e.target.value) })}
         placeholder="Extensões: png, jpg, jpeg"
       />
       <div className="flex gap-2">
         <Input
-          className="h-7 flex-1 font-mono text-[12px]"
+          className="h-10 flex-1 font-mono text-[12px]"
           value={rule.destination}
           onChange={(e) => onChange({ ...rule, destination: e.target.value })}
           placeholder="Pasta de destino"
         />
-        <Button variant="secondary" size="sm" className="h-7 px-2 text-[11.5px]" onClick={handleChooseDestination}>
+        <Button variant="secondary" size="sm" className="h-10 px-2 text-[11.5px]" onClick={handleChooseDestination}>
           Escolher…
         </Button>
       </div>
@@ -640,7 +640,7 @@ function KeywordRuleForm({
   };
 
   return (
-    <div className={cnDisabled(!rule.enabled, "flex flex-col gap-2 rounded-md border border-border bg-bg-200 p-3")}>
+    <div className={cnDisabled(!rule.enabled, "flex flex-col gap-2 rounded-none border border-border bg-bg-100 p-4")}>
       <div className="flex items-center gap-2">
         <Select value={rule.matchType} onValueChange={(v) => onChange({ ...rule, matchType: v as KeywordMatchType })}>
           <SelectTrigger className="h-7 w-[130px] shrink-0 text-[12px]">
@@ -655,30 +655,30 @@ function KeywordRuleForm({
           </SelectContent>
         </Select>
         <Input
-          className="h-7 flex-1 text-[12.5px]"
+          className="h-10 flex-1 text-[12.5px]"
           value={rule.keyword}
           onChange={(e) => onChange({ ...rule, keyword: e.target.value })}
           placeholder="Palavra-chave"
         />
         <Switch checked={rule.enabled} onCheckedChange={(v) => onChange({ ...rule, enabled: v })} />
-        <Button variant="ghost" size="icon" onClick={onRemove} className="h-6 w-6 hover:bg-danger-subtle hover:text-danger">
+        <Button variant="ghost" size="icon" onClick={onRemove} className="h-10 w-10 hover:text-danger">
           <Trash2 className="h-3 w-3" />
         </Button>
       </div>
       <Input
-        className="h-7 text-[12.5px]"
+        className="h-10 text-[12.5px]"
         value={rule.extensions.join(", ")}
         onChange={(e) => onChange({ ...rule, extensions: parseExtensions(e.target.value) })}
         placeholder="Extensões (vazio = qualquer uma)"
       />
       <div className="flex gap-2">
         <Input
-          className="h-7 flex-1 font-mono text-[12px]"
+          className="h-10 flex-1 font-mono text-[12px]"
           value={rule.destination}
           onChange={(e) => onChange({ ...rule, destination: e.target.value })}
           placeholder="Pasta de destino"
         />
-        <Button variant="secondary" size="sm" className="h-7 px-2 text-[11.5px]" onClick={handleChooseDestination}>
+        <Button variant="secondary" size="sm" className="h-10 px-2 text-[11.5px]" onClick={handleChooseDestination}>
           Escolher…
         </Button>
       </div>
@@ -750,17 +750,17 @@ function ActionRuleForm({
   onRemove: () => void;
 }) {
   return (
-    <Card className={cnDisabled(!rule.enabled, "flex flex-col gap-3 border-warning/25")}>
+    <Card className={cnDisabled(!rule.enabled, "flex flex-col gap-3 border-warning")}>
       <div className="flex items-center gap-3">
         <Zap className="h-4 w-4 shrink-0 text-warning" />
         <Input
-          className="flex-1 border-none bg-transparent p-0 text-[14px] font-semibold shadow-none focus-visible:ring-0"
+          className="flex-1 border-none bg-transparent p-0 text-[14px] font-bold shadow-none focus-visible:ring-0"
           value={rule.name}
           onChange={(e) => onChange({ ...rule, name: e.target.value })}
           placeholder="Nome da regra"
         />
         <Switch checked={rule.enabled} onCheckedChange={(v) => onChange({ ...rule, enabled: v })} />
-        <Button variant="ghost" size="icon" onClick={onRemove} className="hover:bg-danger-subtle hover:text-danger">
+        <Button variant="ghost" size="icon" onClick={onRemove} className="hover:text-danger">
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
       </div>
@@ -828,7 +828,7 @@ function ActivityView({
       ) : (
         <div className="flex flex-col gap-2">
           {activity.map((entry) => (
-            <div key={entry.id} className="flex items-center gap-3 rounded-lg border border-border bg-bg-100 p-3">
+            <div key={entry.id} className="flex items-center gap-3 rounded-none border border-border bg-bg-100 p-4">
               <ActivityIcon status={entry.status} />
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
@@ -854,9 +854,9 @@ function ActivityView({
 }
 
 function ActivityIcon({ status }: { status: ActivityEntry["status"] }) {
-  if (status === "moved") return <div className="h-2 w-2 shrink-0 rounded-full bg-success" />;
+  if (status === "moved") return <div className="h-2 w-2 shrink-0 bg-success" />;
   if (status === "deleted") return <Trash2 className="h-3.5 w-3.5 shrink-0 text-warning" />;
-  return <div className="h-2 w-2 shrink-0 rounded-full bg-danger" />;
+  return <div className="h-2 w-2 shrink-0 bg-danger" />;
 }
 
 function VaultView({
@@ -1054,7 +1054,7 @@ function RemindersView({
 
       {done.length > 0 && (
         <div className="flex flex-col gap-2 border-t border-border pt-4">
-          <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">Concluídos ({done.length})</h3>
+          <h3 className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">Concluídos ({done.length})</h3>
           {done.map((r) => (
             <ReminderItem
               key={r.id}
@@ -1139,7 +1139,7 @@ function SettingsView({ config, onUpdate }: { config: AppConfig; onUpdate: (patc
       <Card className="flex flex-col gap-3">
         <div className="flex items-center gap-2">
           <SettingsIcon className="h-4 w-4 text-ink-muted" />
-          <h2 className="text-sm font-semibold text-ink">Verificação periódica</h2>
+          <h2 className="text-[14px] font-bold uppercase tracking-[1.5px] text-ink">Verificação periódica</h2>
         </div>
         <p className="text-[12.5px] text-ink-muted">Intervalo em que as regras de ação são reavaliadas em segundo plano.</p>
         <div className="flex flex-col gap-1.5">
@@ -1154,7 +1154,7 @@ function SettingsView({ config, onUpdate }: { config: AppConfig; onUpdate: (patc
       </Card>
 
       <Card className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold text-ink">Inicialização</h2>
+        <h2 className="text-[14px] font-bold uppercase tracking-[1.5px] text-ink">Inicialização</h2>
         <label className="flex items-center justify-between gap-3">
           <span className="text-[13px] text-ink-muted">Iniciar automaticamente com o Windows (minimizado na bandeja)</span>
           <Switch checked={config.autostart} onCheckedChange={(v) => onUpdate({ autostart: v })} />
@@ -1202,7 +1202,7 @@ function UpdateCard() {
 
   return (
     <Card className="flex flex-col gap-3">
-      <h2 className="text-sm font-semibold text-ink">Atualizações</h2>
+      <h2 className="text-[14px] font-bold uppercase tracking-[1.5px] text-ink">Atualizações</h2>
       {available?.available ? (
         <>
           <p className="text-[12.5px] text-ink-muted">

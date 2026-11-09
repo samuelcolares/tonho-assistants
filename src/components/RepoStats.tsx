@@ -129,7 +129,7 @@ export function RepoStatsView() {
 
       {projects.length === 0 && (
         <div className="flex flex-col items-center justify-center gap-2 py-12 text-center">
-          <p className="text-sm font-semibold text-ink">Nenhum repositório adicionado ainda</p>
+          <p className="text-[14px] font-bold uppercase tracking-[1.5px] text-ink">Nenhum repositório adicionado ainda</p>
           <p className="max-w-xs text-sm text-ink-muted">
             Adicione uma pasta local que seja um projeto git pra começar a ver as estatísticas.
           </p>
@@ -144,7 +144,7 @@ export function RepoStatsView() {
             onClick={() => setSelectedId(project.id)}
           >
             <div className="flex items-center justify-between gap-2">
-              <span className="flex items-center gap-2 truncate text-sm font-semibold text-bonnie">
+              <span className="flex items-center gap-2 truncate text-[14px] font-bold uppercase tracking-[1px] text-bonnie">
                 <GitBranch className="h-4 w-4 shrink-0" />
                 {project.name}
               </span>
@@ -155,7 +155,7 @@ export function RepoStatsView() {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="hover:bg-danger-subtle hover:text-danger"
+                  className="hover:text-danger"
                   onClick={() => setDeleteTarget(project)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -388,7 +388,7 @@ function RepoDetailView({
           <Button variant="ghost" size="sm" onClick={onBack}>
             ← Repos
           </Button>
-          <h2 className="text-sm font-semibold text-ink">{project.name}</h2>
+          <h2 className="text-[28px] font-bold uppercase leading-[1.15] text-ink">{project.name}</h2>
           <Button variant="ghost" size="icon" onClick={onEdit}>
             ✎
           </Button>
@@ -406,8 +406,8 @@ function RepoDetailView({
           <button
             key={p.value}
             onClick={() => setPreset(p.value)}
-            className={`rounded-full px-3 py-1 text-[12.5px] font-medium transition-colors ${
-              preset === p.value ? "bg-bonnie-subtle text-bonnie" : "text-ink-muted hover:bg-bg-200"
+            className={`min-h-[44px] border-b-2 px-3 text-[12px] font-bold uppercase tracking-[1.5px] transition-colors ${
+              preset === p.value ? "border-bonnie text-ink" : "border-transparent text-ink-muted hover:text-ink"
             }`}
           >
             {p.label}
@@ -415,15 +415,15 @@ function RepoDetailView({
         ))}
         {preset === "custom" && (
           <div className="flex items-center gap-2">
-            <Input type="date" className="h-8 w-auto" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
+            <Input type="date" className="h-10 w-auto" value={customSince} onChange={(e) => setCustomSince(e.target.value)} />
             <span className="text-ink-faint">até</span>
-            <Input type="date" className="h-8 w-auto" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
+            <Input type="date" className="h-10 w-auto" value={customUntil} onChange={(e) => setCustomUntil(e.target.value)} />
           </div>
         )}
       </div>
 
       {error && (
-        <Card className="flex flex-col gap-2 border-danger/30">
+        <Card className="flex flex-col gap-2 border-danger">
           <p className="text-sm text-danger">{error}</p>
           <Button
             variant="secondary"
@@ -463,8 +463,8 @@ function RepoDetailView({
                 <StatTile label="PRs abertas" value={stats.github.openPrsAuthored} tone="warning" />
               </>
             ) : hasGithub && tokenStatus.configured && stats.githubError ? (
-              <Card className="col-span-2 flex flex-col gap-1 border-warning/30">
-                <span className="text-[11px] uppercase tracking-wide text-ink-faint">GitHub</span>
+              <Card className="col-span-2 flex flex-col gap-1 border-warning">
+                <span className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">GitHub</span>
                 <p className="text-[12.5px] text-warning">{stats.githubError}</p>
               </Card>
             ) : (
@@ -485,7 +485,7 @@ function RepoDetailView({
           </div>
 
           <Card className="flex flex-col gap-3">
-            <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+            <h3 className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">
               Atividade no período
             </h3>
             <CommitActivityChart data={stats.local.commitsByDay} />
@@ -494,7 +494,7 @@ function RepoDetailView({
           {stats.contributors.length > 0 && (
             <Card className="flex flex-col gap-3">
               <div className="flex items-center justify-between">
-                <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">
+                <h3 className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">
                   Comparação com outros contribuintes
                 </h3>
                 <div className="flex gap-1">
@@ -502,8 +502,8 @@ function RepoDetailView({
                     <button
                       key={m.value}
                       onClick={() => setCompareMetric(m.value)}
-                      className={`rounded-full px-2.5 py-1 text-[11.5px] font-medium transition-colors ${
-                        compareMetric === m.value ? "bg-bonnie-subtle text-bonnie" : "text-ink-muted hover:bg-bg-200"
+                      className={`min-h-[44px] border-b-2 px-2.5 text-[11px] font-bold uppercase tracking-[1.5px] transition-colors ${
+                        compareMetric === m.value ? "border-bonnie text-ink" : "border-transparent text-ink-muted hover:text-ink"
                       }`}
                     >
                       {m.label}
@@ -554,8 +554,8 @@ function StatTile({
   const toneClass = tone === "success" ? "text-success" : tone === "danger" ? "text-danger" : tone === "warning" ? "text-warning" : "text-ink";
   return (
     <Card className="flex flex-col gap-1">
-      <span className="text-[11px] uppercase tracking-wide text-ink-faint">{label}</span>
-      <span className={`text-2xl font-bold ${toneClass}`}>{value}</span>
+      <span className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">{label}</span>
+      <span className={`text-[32px] font-bold tabular-nums ${toneClass}`}>{value}</span>
     </Card>
   );
 }
@@ -591,7 +591,7 @@ function GithubConnectionCard({
     <Card className="flex flex-col gap-2">
       <div className="flex items-center gap-2">
         <GitBranch className="h-4 w-4 text-ink-muted" />
-        <h3 className="text-[11px] font-semibold uppercase tracking-wide text-ink-faint">GitHub</h3>
+        <h3 className="text-[12px] font-bold uppercase tracking-[1.5px] text-ink-faint">GitHub</h3>
       </div>
       {status.configured ? (
         <>
@@ -632,15 +632,15 @@ function CommitActivityChart({ data }: { data: { date: string; count: number }[]
   return (
     <ResponsiveContainer width="100%" height={220}>
       <BarChart data={data} margin={{ top: 4, right: 8, left: -16, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#23273a" vertical={false} />
-        <XAxis dataKey="date" tick={{ fill: "#9298b3", fontSize: 11 }} axisLine={{ stroke: "#23273a" }} tickLine={false} />
-        <YAxis tick={{ fill: "#9298b3", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+        <CartesianGrid strokeDasharray="0" stroke="#3c3c3c" vertical={false} />
+        <XAxis dataKey="date" tick={{ fill: "#8a8a8a", fontSize: 11 }} axisLine={{ stroke: "#3c3c3c" }} tickLine={false} />
+        <YAxis tick={{ fill: "#8a8a8a", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
         <Tooltip
-          contentStyle={{ background: "#12141d", border: "1px solid #23273a", borderRadius: 8, fontSize: 12 }}
-          labelStyle={{ color: "#eef0f7" }}
+          contentStyle={{ background: "#000000", border: "1px solid #3c3c3c", borderRadius: 0, fontSize: 12 }}
+          labelStyle={{ color: "#ffffff" }}
         />
         <Legend wrapperStyle={{ fontSize: 12 }} formatter={() => "Commits"} />
-        <Bar dataKey="count" name="Commits" fill="#3b9eff" radius={[4, 4, 0, 0]} maxBarSize={28} />
+        <Bar dataKey="count" name="Commits" fill="#ffffff" radius={0} maxBarSize={28} />
       </BarChart>
     </ResponsiveContainer>
   );
@@ -669,24 +669,24 @@ function ContributorCompareChart({
 }) {
   const dataKey = COMPARE_METRIC_KEY[metric];
   const data = [...contributors].sort((a, b) => b[dataKey] - a[dataKey]).slice(0, 10);
-  const barColor = metric === "deletions" ? "#f87171" : metric === "additions" ? "#34d399" : "#3b9eff";
+  const barColor = metric === "deletions" ? "#ff6b5e" : metric === "additions" ? "#2dc98a" : "#ffffff";
 
   return (
     <ResponsiveContainer width="100%" height={Math.max(120, data.length * 36)}>
       <BarChart data={data} layout="vertical" margin={{ top: 4, right: 16, left: 8, bottom: 0 }}>
-        <CartesianGrid strokeDasharray="3 3" stroke="#23273a" horizontal={false} />
-        <XAxis type="number" tick={{ fill: "#9298b3", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
+        <CartesianGrid strokeDasharray="0" stroke="#3c3c3c" horizontal={false} />
+        <XAxis type="number" tick={{ fill: "#8a8a8a", fontSize: 11 }} axisLine={false} tickLine={false} allowDecimals={false} />
         <YAxis
           type="category"
           dataKey="login"
-          tick={{ fill: "#eef0f7", fontSize: 12 }}
+          tick={{ fill: "#ffffff", fontSize: 12 }}
           axisLine={false}
           tickLine={false}
           width={100}
         />
         <Tooltip
-          contentStyle={{ background: "#12141d", border: "1px solid #23273a", borderRadius: 8, fontSize: 12 }}
-          labelStyle={{ color: "#eef0f7" }}
+          contentStyle={{ background: "#000000", border: "1px solid #3c3c3c", borderRadius: 0, fontSize: 12 }}
+          labelStyle={{ color: "#ffffff" }}
         />
         <Bar dataKey={dataKey} name={COMPARE_METRICS.find((m) => m.value === metric)!.label} radius={[0, 4, 4, 0]} maxBarSize={20}>
           {data.map((d) => (

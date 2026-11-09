@@ -4,20 +4,20 @@ import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 
 const buttonVariants = cva(
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-md text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring focus-visible:ring-offset-2 focus-visible:ring-offset-bg-000 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-none text-[12px] font-bold uppercase tracking-[1.5px] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-40 [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-brand-solid text-ink hover:bg-brand-solid-hover",
-        secondary: "border border-border bg-bg-200 text-ink hover:bg-bg-300",
-        ghost: "text-ink-muted hover:bg-bg-200 hover:text-ink",
+        default: "border border-ink bg-transparent text-ink hover:bg-ink hover:text-bg-000",
+        secondary: "border border-border bg-bg-200 text-ink hover:border-ink",
+        ghost: "border border-transparent text-ink-muted hover:text-ink",
         destructive:
-          "border border-border bg-transparent text-danger hover:border-danger hover:bg-danger-subtle",
+          "border border-danger bg-transparent text-danger hover:bg-danger hover:text-bg-000",
       },
       size: {
-        default: "h-9 px-4",
-        sm: "h-8 px-3 text-[13px]",
-        icon: "h-7 w-7 shrink-0 p-0",
+        default: "h-11 px-6",
+        sm: "h-9 px-4",
+        icon: "h-11 w-11 shrink-0 rounded-full p-0",
       },
     },
     defaultVariants: { variant: "default", size: "default" },

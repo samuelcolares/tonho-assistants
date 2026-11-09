@@ -25,9 +25,9 @@ export function VaultCard({ label, content, onEdit, onDelete }: VaultCardProps) 
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-lg border border-border bg-bg-100 p-4">
+    <div className="flex flex-col gap-3 rounded-none border border-border bg-bg-100 p-4">
       <div className="flex items-center justify-between gap-2">
-        <span className="truncate text-sm font-semibold text-bonnie">{label}</span>
+        <span className="truncate text-[13px] font-bold uppercase tracking-[1.5px] text-bonnie">{label}</span>
         <div className="flex shrink-0 gap-0.5">
           <Button variant="ghost" size="icon" onClick={onEdit} title="Editar">
             <Pencil className="h-3.5 w-3.5" />
@@ -37,21 +37,21 @@ export function VaultCard({ label, content, onEdit, onDelete }: VaultCardProps) 
             size="icon"
             onClick={onDelete}
             title="Excluir"
-            className="hover:bg-danger-subtle hover:text-danger"
+            className="hover:text-danger"
           >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
-      <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-all rounded-md border border-border bg-bg-000 p-3 font-mono text-[13px] text-ink">
+      <div className="max-h-32 overflow-y-auto whitespace-pre-wrap break-all rounded-none border border-border bg-bg-000 p-3 font-mono text-[13px] text-ink">
         {content}
       </div>
 
       <Button
         size="sm"
         onClick={handleCopy}
-        className={copied ? "bg-bg-200 text-ink hover:bg-bg-200" : undefined}
+        className={copied ? "border-ink bg-ink text-bg-000 hover:bg-ink hover:text-bg-000" : undefined}
       >
         {copied ? (
           <>

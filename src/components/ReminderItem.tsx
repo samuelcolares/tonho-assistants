@@ -38,7 +38,7 @@ export function ReminderItem({
   const dotClass = done ? "bg-ink-faint" : overdue ? "bg-warning" : "bg-dante";
 
   return (
-    <div className="flex flex-col gap-1 rounded-lg border border-border bg-bg-100 p-3.5">
+    <div className="flex flex-col gap-1 rounded-none border border-border bg-bg-100 p-4">
       <div className="flex items-center gap-3">
         <input
           type="checkbox"
@@ -46,9 +46,9 @@ export function ReminderItem({
           onChange={onToggleDone}
           className="h-4 w-4 shrink-0 accent-brand-solid"
         />
-        <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", dotClass)} />
+        <span className={cn("h-1.5 w-1.5 shrink-0", dotClass)} />
         <div className="min-w-0 flex-1">
-          <p className={cn("truncate text-sm font-semibold", done ? "text-ink-faint line-through" : "text-ink")}>
+          <p className={cn("truncate text-[14px] font-bold", done ? "text-ink-faint line-through" : "text-ink")}>
             {title}
           </p>
           <div className="mt-0.5 flex items-center gap-1.5 text-[12px] text-ink-muted">
@@ -65,7 +65,7 @@ export function ReminderItem({
           size="icon"
           onClick={onDelete}
           title="Excluir"
-          className="hover:bg-danger-subtle hover:text-danger"
+          className="hover:text-danger"
         >
           <Trash2 className="h-3.5 w-3.5" />
         </Button>
